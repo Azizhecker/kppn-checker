@@ -12,7 +12,7 @@ export default function LoginPage() {
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
     // Ganti ini dengan sistem autentikasi asli atau cek sederhana
-    if (username === 'admin' && password === 'admin123') {
+    if (username === 'admin' && password === 'kppn123') {
       router.push('/admin');
     } else {
       alert('Akun Admin salah!');
