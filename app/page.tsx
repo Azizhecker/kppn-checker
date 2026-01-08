@@ -42,8 +42,7 @@ export default function EntryPage() {
             >
               <QrCode size={40} />
               <div className="text-center">
-                <span className="block font-black text-lg">PELAKSANA CS</span>
-                <span className="text-[10px] opacity-60 font-bold uppercase tracking-widest">Klik untuk Scan Barcode</span>
+                <span className="block font-black text-lg">PENGAWASAN PEMELIHARAAN</span>
               </div>
             </button>
 
