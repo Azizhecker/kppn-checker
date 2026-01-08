@@ -16,31 +16,52 @@ export default function AdminPage() {
   }, [date]);
 
   async function fetchData() {
+    // Ambil Template Tugas untuk Header
+    const { data: templates } = await supabase.from('task_templates').select('task_name');
+    if (templates) setAllTasks(templates.map(t => t.task_name));
+
+    // Ambil Data Logs
     const { data: logsData } = await supabase
       .from('checklist_logs')
       .select(`
         *,
         locations(name),
-        checklist_items(
-          is_completed,
-          task_templates(task_name)
-        )
+        checklist_items(is_completed, task_templates(task_name))
       `)
       .gte('created_at', `${date}T00:00:00`)
       .lte('created_at', `${date}T23:59:59`)
       .order('created_at', { ascending: false });
-    
-    // Identifikasi semua jenis tugas yang ada secara dinamis
-    const taskNames = new Set<string>();
-    logsData?.forEach(log => {
-      log.checklist_items?.forEach((item: any) => {
-        if (item.task_templates) taskNames.add(item.task_templates.task_name);
-      });
-    });
 
-    setAllTasks(Array.from(taskNames));
     setLogs(logsData || []);
   }
+
+  // FUNGSI DOWNLOAD EXCEL
+  const handleDownloadExcel = () => {
+    if (logs.length === 0) return alert("Tidak ada data untuk tanggal ini");
+
+    const dataUntukExcel = logs.map((log) => {
+      const row: any = {
+        'TANGGAL': new Date(log.created_at).toLocaleDateString('id-ID'),
+        'JAM': new Date(log.created_at).toLocaleTimeString('id-ID'),
+        'LOKASI': log.locations?.name,
+        'PETUGAS': log.worker_name,
+        'STATUS': log.status,
+      };
+
+      // Tambahkan kolom centang secara dinamis
+      allTasks.forEach((taskName) => {
+        const item = log.checklist_items?.find((i: any) => i.task_templates?.task_name === taskName);
+        row[taskName] = item?.is_completed ? 'V' : '-';
+      });
+
+      return row;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(dataUntukExcel);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan");
+    XLSX.writeFile(workbook, `Laporan_Kebersihan_${date}.xlsx`);
+  };
 
   const handleApprove = async (id: string) => {
     await supabase.from('checklist_logs').update({ status: 'Disetujui' }).eq('id', id);
@@ -49,7 +70,6 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC]">
-      {/* HEADER NAV */}
       <nav className="bg-[#003366] p-5 text-white flex justify-between items-center shadow-md">
         <div className="flex items-center gap-3">
           <div className="bg-white/10 p-2 rounded-xl border border-white/20"><ClipboardList size={24}/></div>
@@ -59,23 +79,20 @@ export default function AdminPage() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <input 
-            type="date" value={date} 
-            onChange={(e) => setDate(e.target.value)} 
-            className="text-slate-800 p-2 rounded-lg text-xs font-bold outline-none border-none shadow-inner"
-          />
-          <button onClick={() => router.push('/')} className="bg-red-500 hover:bg-red-600 p-2 rounded-lg transition-colors">
-            <LogOut size={18}/>
-          </button>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-slate-800 p-2 rounded-lg text-xs font-bold outline-none border-none shadow-inner"/>
+          <button onClick={() => router.push('/')} className="bg-red-500 hover:bg-red-600 p-2 rounded-lg transition-colors"><LogOut size={18}/></button>
         </div>
       </nav>
 
-      {/* TABEL AREA */}
       <div className="p-4 md:p-8">
         <div className="bg-white rounded-[2rem] shadow-2xl shadow-slate-200 border border-slate-100 overflow-hidden">
           <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
             <h2 className="font-black text-slate-800 text-sm uppercase italic">Data Hasil Kebersihan Ruangan</h2>
-            <button className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-green-100">
+            {/* PASTIKAN onClick TERPASANG DI SINI */}
+            <button 
+              onClick={handleDownloadExcel}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-green-100"
+            >
               <FileDown size={14}/> EXCEL
             </button>
           </div>
@@ -105,7 +122,7 @@ export default function AdminPage() {
                     <td className="p-5 font-bold text-slate-600 uppercase italic">{log.worker_name}</td>
                     
                     {allTasks.map(taskName => {
-                      const item = log.checklist_items.find((i: any) => i.task_templates?.task_name === taskName);
+                      const item = log.checklist_items?.find((i: any) => i.task_templates?.task_name === taskName);
                       return (
                         <td key={taskName} className="p-5 text-center border-l border-slate-50">
                           {item?.is_completed ? (
