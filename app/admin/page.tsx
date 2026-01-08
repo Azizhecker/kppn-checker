@@ -9,18 +9,29 @@ export default function AdminPage() {
   const [logs, setLogs] = useState<any[]>([]);
   const [allTasks, setAllTasks] = useState<string[]>([]);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isMonthly, setIsMonthly] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     fetchData();
-  }, [date]);
+  }, [date, isMonthly]);
 
   async function fetchData() {
     // Ambil Template Tugas untuk Header
     const { data: templates } = await supabase.from('task_templates').select('task_name');
     if (templates) setAllTasks(templates.map(t => t.task_name));
 
-    // Ambil Data Logs
+    // Filter Tanggal
+    let startDate, endDate;
+    if (!isMonthly) {
+      startDate = `${date}T00:00:00`;
+      endDate = `${date}T23:59:59`;
+    } else {
+      const [year, month] = date.split('-');
+      startDate = `${year}-${month}-01T00:00:00`;
+      endDate = `${year}-${month}-31T23:59:59`;
+    }
+
     const { data: logsData } = await supabase
       .from('checklist_logs')
       .select(`
@@ -28,30 +39,33 @@ export default function AdminPage() {
         locations(name),
         checklist_items(is_completed, task_templates(task_name))
       `)
-      .gte('created_at', `${date}T00:00:00`)
-      .lte('created_at', `${date}T23:59:59`)
+      .gte('created_at', startDate)
+      .lte('created_at', endDate)
       .order('created_at', { ascending: false });
 
     setLogs(logsData || []);
   }
 
-  // FUNGSI DOWNLOAD EXCEL
   const handleDownloadExcel = () => {
-    if (logs.length === 0) return alert("Tidak ada data untuk tanggal ini");
+    if (logs.length === 0) return alert("Tidak ada data untuk diunduh");
 
     const dataUntukExcel = logs.map((log) => {
       const row: any = {
         'TANGGAL': new Date(log.created_at).toLocaleDateString('id-ID'),
-        'JAM': new Date(log.created_at).toLocaleTimeString('id-ID'),
-        'LOKASI': log.locations?.name,
-        'PETUGAS': log.worker_name,
-        'STATUS': log.status,
+        'JAM': new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+        'LOKASI RUANGAN': log.locations?.name?.toUpperCase(),
+        'NAMA PETUGAS': log.worker_name?.toUpperCase(),
+        'STATUS VALIDASI': log.status,
       };
 
-      // Tambahkan kolom centang secara dinamis
       allTasks.forEach((taskName) => {
         const item = log.checklist_items?.find((i: any) => i.task_templates?.task_name === taskName);
-        row[taskName] = item?.is_completed ? 'V' : '-';
+        // Jika item ada tampilkan centang/silang, jika tidak ada di kategori ruangan tsb tampilkan strip
+        if (item) {
+          row[taskName] = item.is_completed ? '✔' : '✘';
+        } else {
+          row[taskName] = '-';
+        }
       });
 
       return row;
@@ -59,8 +73,17 @@ export default function AdminPage() {
 
     const worksheet = XLSX.utils.json_to_sheet(dataUntukExcel);
     const workbook = XLSX.utils.book_new();
+
+    // Auto-width kolom agar tidak kecil/terpotong di Excel
+    const wscols = [
+      { wch: 15 }, { wch: 10 }, { wch: 25 }, { wch: 20 }, { wch: 15 },
+      ...allTasks.map(() => ({ wch: 18 }))
+    ];
+    worksheet['!cols'] = wscols;
+
     XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan");
-    XLSX.writeFile(workbook, `Laporan_Kebersihan_${date}.xlsx`);
+    const fileLabel = isMonthly ? `Bulanan_${date.substring(0, 7)}` : `Harian_${date}`;
+    XLSX.writeFile(workbook, `Laporan_Kebersihan_${fileLabel}.xlsx`);
   };
 
   const handleApprove = async (id: string) => {
@@ -70,7 +93,7 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC]">
-      <nav className="bg-[#003366] p-5 text-white flex justify-between items-center shadow-md">
+      <nav className="bg-[#003366] p-5 text-white flex justify-between items-center shadow-md sticky top-0 z-[100]">
         <div className="flex items-center gap-3">
           <div className="bg-white/10 p-2 rounded-xl border border-white/20"><ClipboardList size={24}/></div>
           <div>
@@ -79,6 +102,13 @@ export default function AdminPage() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          <select 
+            onChange={(e) => setIsMonthly(e.target.value === 'true')}
+            className="text-slate-800 p-2 rounded-lg text-[10px] font-bold outline-none border-none shadow-inner cursor-pointer"
+          >
+            <option value="false">HARIAN</option>
+            <option value="true">BULANAN</option>
+          </select>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-slate-800 p-2 rounded-lg text-xs font-bold outline-none border-none shadow-inner"/>
           <button onClick={() => router.push('/')} className="bg-red-500 hover:bg-red-600 p-2 rounded-lg transition-colors"><LogOut size={18}/></button>
         </div>
@@ -87,11 +117,13 @@ export default function AdminPage() {
       <div className="p-4 md:p-8">
         <div className="bg-white rounded-[2rem] shadow-2xl shadow-slate-200 border border-slate-100 overflow-hidden">
           <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
-            <h2 className="font-black text-slate-800 text-sm uppercase italic">Data Hasil Kebersihan Ruangan</h2>
-            {/* PASTIKAN onClick TERPASANG DI SINI */}
+            <div>
+                <h2 className="font-black text-slate-800 text-sm uppercase italic">Data Hasil Kebersihan Ruangan</h2>
+                <p className="text-[9px] font-bold text-blue-500 tracking-tight">Mode: {isMonthly ? 'Laporan Seluruh Bulan' : 'Laporan Tanggal Terpilih'}</p>
+            </div>
             <button 
               onClick={handleDownloadExcel}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-green-100"
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-green-100 transition-transform active:scale-95"
             >
               <FileDown size={14}/> EXCEL
             </button>
@@ -101,23 +133,28 @@ export default function AdminPage() {
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-slate-100 text-[10px] uppercase font-black text-slate-500">
-                  <th className="p-5 border-b sticky left-0 bg-slate-100 z-10">LOKASI / JAM</th>
-                  <th className="p-5 border-b">PETUGAS</th>
+                  <th className="p-5 border-b sticky left-0 bg-slate-100 z-10 min-w-[160px]">LOKASI / JAM</th>
+                  <th className="p-5 border-b min-w-[140px]">PETUGAS</th>
                   {allTasks.map(task => (
-                    <th key={task} className="p-5 border-b text-center text-[9px] border-l border-slate-200">{task}</th>
+                    <th key={task} className="p-5 border-b text-center text-[9px] border-l border-slate-200 min-w-[100px] whitespace-normal">
+                      {task}
+                    </th>
                   ))}
-                  <th className="p-5 border-b text-center">STATUS</th>
-                  <th className="p-5 border-b text-center">VALIDASI</th>
+                  <th className="p-5 border-b text-center min-w-[100px]">STATUS</th>
+                  <th className="p-5 border-b text-center min-w-[120px]">VALIDASI</th>
                 </tr>
               </thead>
               <tbody className="text-xs">
                 {logs.length === 0 ? (
-                  <tr><td colSpan={allTasks.length + 4} className="p-20 text-center font-black text-slate-300 uppercase italic text-sm">Data Kosong</td></tr>
+                  <tr><td colSpan={allTasks.length + 4} className="p-20 text-center font-black text-slate-300 uppercase italic text-sm">Data Tidak Ditemukan</td></tr>
                 ) : logs.map((log) => (
                   <tr key={log.id} className="hover:bg-blue-50/30 border-b border-slate-50 transition-colors">
                     <td className="p-5 sticky left-0 bg-white z-10 border-r border-slate-100 shadow-sm">
-                      <div className="font-black text-slate-800 uppercase">{log.locations?.name}</div>
-                      <div className="text-[10px] text-blue-500 font-bold">{new Date(log.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} WIB</div>
+                      <div className="font-black text-slate-800 uppercase leading-none">{log.locations?.name}</div>
+                      <div className="text-[10px] text-blue-500 font-bold mt-1">
+                        {isMonthly && <span className="mr-1">{new Date(log.created_at).toLocaleDateString('id-ID', {day:'2-digit', month:'short'})}</span>}
+                        {new Date(log.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} WIB
+                      </div>
                     </td>
                     <td className="p-5 font-bold text-slate-600 uppercase italic">{log.worker_name}</td>
                     
@@ -125,10 +162,14 @@ export default function AdminPage() {
                       const item = log.checklist_items?.find((i: any) => i.task_templates?.task_name === taskName);
                       return (
                         <td key={taskName} className="p-5 text-center border-l border-slate-50">
-                          {item?.is_completed ? (
-                            <Check className="text-green-500 mx-auto" size={18} strokeWidth={4}/>
+                          {item ? (
+                            item.is_completed ? (
+                              <Check className="text-green-500 mx-auto" size={18} strokeWidth={4}/>
+                            ) : (
+                              <X className="text-red-300 mx-auto" size={16} />
+                            )
                           ) : (
-                            <X className="text-red-200 mx-auto" size={16} />
+                            <span className="text-slate-200 font-bold">-</span>
                           )}
                         </td>
                       );
@@ -141,7 +182,7 @@ export default function AdminPage() {
                     </td>
                     <td className="p-5 text-center">
                       {log.status === 'Diserahkan' && (
-                        <button onClick={() => handleApprove(log.id)} className="bg-[#003366] text-white px-4 py-2 rounded-xl font-black text-[10px] shadow-lg shadow-blue-100">APPROVE</button>
+                        <button onClick={() => handleApprove(log.id)} className="bg-[#003366] hover:bg-blue-900 text-white px-4 py-2 rounded-xl font-black text-[10px] shadow-lg shadow-blue-100 transition-all">APPROVE</button>
                       )}
                     </td>
                   </tr>
