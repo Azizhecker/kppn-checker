@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
-import { FileDown, LogOut, Check, X, ClipboardList } from 'lucide-react';
+import { FileDown, LogOut, Check, X, ClipboardList, AlertCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -17,11 +17,9 @@ export default function AdminPage() {
   }, [date, isMonthly]);
 
   async function fetchData() {
-    // Ambil Template Tugas untuk Header
     const { data: templates } = await supabase.from('task_templates').select('task_name');
     if (templates) setAllTasks(templates.map(t => t.task_name));
 
-    // Filter Tanggal
     let startDate, endDate;
     if (!isMonthly) {
       startDate = `${date}T00:00:00`;
@@ -55,12 +53,10 @@ export default function AdminPage() {
         'JAM': new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
         'LOKASI RUANGAN': log.locations?.name?.toUpperCase(),
         'NAMA PETUGAS': log.worker_name?.toUpperCase(),
-        'STATUS VALIDASI': log.status,
       };
 
       allTasks.forEach((taskName) => {
         const item = log.checklist_items?.find((i: any) => i.task_templates?.task_name === taskName);
-        // Jika item ada tampilkan centang/silang, jika tidak ada di kategori ruangan tsb tampilkan strip
         if (item) {
           row[taskName] = item.is_completed ? '✔' : '✘';
         } else {
@@ -68,16 +64,19 @@ export default function AdminPage() {
         }
       });
 
+      row['CATATAN KERUSAKAN'] = log.notes || '-';
+      row['STATUS VALIDASI'] = log.status;
+
       return row;
     });
 
     const worksheet = XLSX.utils.json_to_sheet(dataUntukExcel);
     const workbook = XLSX.utils.book_new();
 
-    // Auto-width kolom agar tidak kecil/terpotong di Excel
     const wscols = [
-      { wch: 15 }, { wch: 10 }, { wch: 25 }, { wch: 20 }, { wch: 15 },
-      ...allTasks.map(() => ({ wch: 18 }))
+      { wch: 15 }, { wch: 10 }, { wch: 25 }, { wch: 20 },
+      ...allTasks.map(() => ({ wch: 18 })),
+      { wch: 30 }, { wch: 15 }
     ];
     worksheet['!cols'] = wscols;
 
@@ -140,13 +139,15 @@ export default function AdminPage() {
                       {task}
                     </th>
                   ))}
+                  {/* KOLOM BARU UNTUK URAIAN */}
+                  <th className="p-5 border-b min-w-[200px] border-l border-slate-200 italic">Uraian Kerusakan</th>
                   <th className="p-5 border-b text-center min-w-[100px]">STATUS</th>
                   <th className="p-5 border-b text-center min-w-[120px]">VALIDASI</th>
                 </tr>
               </thead>
               <tbody className="text-xs">
                 {logs.length === 0 ? (
-                  <tr><td colSpan={allTasks.length + 4} className="p-20 text-center font-black text-slate-300 uppercase italic text-sm">Data Tidak Ditemukan</td></tr>
+                  <tr><td colSpan={allTasks.length + 5} className="p-20 text-center font-black text-slate-300 uppercase italic text-sm">Data Tidak Ditemukan</td></tr>
                 ) : logs.map((log) => (
                   <tr key={log.id} className="hover:bg-blue-50/30 border-b border-slate-50 transition-colors">
                     <td className="p-5 sticky left-0 bg-white z-10 border-r border-slate-100 shadow-sm">
@@ -175,7 +176,19 @@ export default function AdminPage() {
                       );
                     })}
 
-                    <td className="p-5 text-center">
+                    {/* MENAMPILKAN URAIAN NOTES */}
+                    <td className="p-5 border-l border-slate-50">
+                      {log.notes ? (
+                        <div className="flex gap-2 items-start text-red-600 font-bold leading-tight bg-red-50 p-2 rounded-lg border border-red-100">
+                          <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                          <span className="text-[10px] uppercase tracking-tight">{log.notes}</span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-200 italic">-</span>
+                      )}
+                    </td>
+
+                    <td className="p-5 text-center border-l border-slate-50">
                       <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${log.status === 'Disetujui' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
                         {log.status}
                       </span>
