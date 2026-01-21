@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react'; // Tambah Suspense
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { 
@@ -8,7 +8,8 @@ import {
   Filter, ChevronLeft, ChevronRight, Info 
 } from 'lucide-react';
 
-export default function RoomMonitoringPage() {
+// 1. Pindahkan seluruh logika utama ke komponen internal ini
+function RoomMonitoringContent() {
   const searchParams = useSearchParams();
   const locId = searchParams.get('loc');
   
@@ -16,7 +17,6 @@ export default function RoomMonitoringPage() {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // State Filter
   const [filterType, setFilterType] = useState<'daily' | 'monthly'>('daily');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -28,12 +28,9 @@ export default function RoomMonitoringPage() {
 
   async function fetchRoomData() {
     setLoading(true);
-    
-    // 1. Ambil Detail Lokasi
     const { data: locData } = await supabase.from('locations').select('*').eq('id', locId).single();
     setLocation(locData);
 
-    // 2. Query Logs dengan Filter
     let query = supabase
       .from('checklist_logs')
       .select(`
@@ -58,7 +55,6 @@ export default function RoomMonitoringPage() {
     setLoading(false);
   }
 
-  // Logika Notifikasi Bolong (Hanya muncul di filter bulanan)
   const getMissingDays = () => {
     if (filterType !== 'monthly') return [];
     const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
@@ -94,7 +90,6 @@ export default function RoomMonitoringPage() {
             </div>
           </div>
 
-          {/* FILTER CONTROLS */}
           <div className="flex flex-wrap gap-2 bg-white/5 p-2 rounded-2xl backdrop-blur-sm border border-white/10">
             <button 
               onClick={() => setFilterType('daily')}
@@ -121,7 +116,6 @@ export default function RoomMonitoringPage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 -mt-8 pb-20">
-        {/* NOTIFIKASI JIKA ADA HARI YANG TERLEWAT */}
         {filterType === 'monthly' && getMissingDays().length > 0 && (
           <div className="bg-red-100 border-l-4 border-red-500 p-4 rounded-2xl mb-6 shadow-sm flex items-start gap-3">
             <AlertCircle className="text-red-500 shrink-0" size={20}/>
@@ -135,7 +129,6 @@ export default function RoomMonitoringPage() {
           </div>
         )}
 
-        {/* TABEL HASIL CEKLIST (STYLE EXCEL) */}
         <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -200,5 +193,14 @@ export default function RoomMonitoringPage() {
         KPPN Lhokseumawe • Digital Monitoring System
       </div>
     </div>
+  );
+}
+
+// 2. Komponen Utama Halaman yang dibungkus Suspense
+export default function RoomMonitoringPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center font-black animate-pulse text-blue-600">MEMUAT HALAMAN...</div>}>
+      <RoomMonitoringContent />
+    </Suspense>
   );
 }
