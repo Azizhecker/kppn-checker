@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { 
-  MapPin, Calendar, AlertCircle, Info, ChevronLeft, ChevronRight 
+  MapPin, UserCheck 
 } from 'lucide-react';
 
 function RoomMonitoringContent() {
@@ -19,7 +19,6 @@ function RoomMonitoringContent() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
-  // Generate daftar tanggal dalam bulan terpilih
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const dateArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
@@ -30,13 +29,26 @@ function RoomMonitoringContent() {
   async function fetchData() {
     setLoading(true);
     
-    // 1. Ambil Nama Lokasi
-    const { data: locData } = await supabase.from('locations').select('*').eq('id', locId).single();
+    // 1. Ambil Nama Lokasi dan Tipenya (Sesuai gambar DB: kolom 'type')
+    const { data: locData } = await supabase
+      .from('locations')
+      .select('*')
+      .eq('id', locId)
+      .single();
+    
     setLocation(locData);
 
-    // 2. Ambil Daftar Master Task (untuk baris kiri)
-    const { data: taskData } = await supabase.from('task_templates').select('*').order('id');
-    setTasks(taskData || []);
+    // 2. Ambil Daftar Master Task
+    // Di database Anda menggunakan kolom 'category' pada task_templates
+    if (locData) {
+      const { data: taskData } = await supabase
+        .from('task_templates')
+        .select('*')
+        .eq('category', locData.type.toLowerCase()) // Pastikan lowercase sesuai isi DB
+        .order('id', { ascending: true });
+      
+      setTasks(taskData || []);
+    }
 
     // 3. Ambil Logs dalam bulan tersebut
     const firstDay = new Date(selectedYear, selectedMonth - 1, 1).toISOString();
@@ -59,118 +71,150 @@ function RoomMonitoringContent() {
     setLoading(false);
   }
 
-  // Fungsi helper untuk mengecek apakah tanggal tersebut hari libur (Sabtu/Minggu)
+  const getWorkerNames = () => {
+    if (logs.length === 0) return "Belum ada petugas";
+    const names = Array.from(new Set(logs.map(l => l.worker_name).filter(Boolean)));
+    return names.join(', ');
+  };
+
   const isWeekend = (day: number) => {
     const date = new Date(selectedYear, selectedMonth - 1, day);
     const dayOfWeek = date.getDay();
-    return dayOfWeek === 0 || dayOfWeek === 6; // 0 = Minggu, 6 = Sabtu
+    return dayOfWeek === 0 || dayOfWeek === 6;
   };
 
-  // Fungsi helper untuk mengecek status checklist per task dan per tanggal
   const getCheckStatus = (taskId: number, day: number) => {
-    // Cari log yang sesuai dengan tanggal ini
+    // Mencari log yang dibuat pada tanggal yang sesuai
     const logAtDay = logs.find(l => new Date(l.created_at).getDate() === day);
     if (!logAtDay) return null;
-
-    // Cari item dalam log tersebut yang sesuai dengan taskId
+    
     const item = logAtDay.checklist_items?.find((i: any) => i.task_id === taskId);
     return item?.is_completed ? 'checked' : 'unchecked';
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-black animate-pulse text-blue-600 text-xs">MENYIAPKAN MATRIX MONITORING...</div>;
-  
-  if (!location) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-10">
-      <AlertCircle size={64} className="text-red-500 mb-4"/>
-      <h1 className="text-2xl font-black uppercase italic">Ruangan Tidak Terdaftar</h1>
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="font-black text-blue-600 text-xs tracking-widest animate-pulse">MENYINKRONKAN DATA...</p>
+      </div>
     </div>
   );
-
+  
   return (
     <div className="min-h-screen bg-white">
-      {/* HEADER */}
-      <div className="bg-[#001f3f] text-white p-6 shadow-xl">
-        <div className="max-w-[100rem] mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-4">
-            <MapPin className="text-blue-400" size={24}/>
+      <div className="bg-[#001f3f] text-white p-8 shadow-xl">
+        <div className="max-w-[100rem] mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div className="flex items-center gap-5">
+            <div className="bg-blue-600 p-4 rounded-3xl shadow-lg shadow-blue-900/50">
+              <MapPin size={32}/>
+            </div>
             <div>
-              <h1 className="text-xl font-black uppercase italic tracking-tighter">{location.name}</h1>
-              <p className="text-[10px] text-blue-300 font-bold uppercase tracking-[0.2em]">Matrix Pengawasan Pemeliharaan</p>
+              <h1 className="text-3xl font-black uppercase italic tracking-tighter leading-tight">
+                {location?.name}
+              </h1>
+              <div className="flex flex-col gap-1 mt-2">
+                <div className="flex items-center gap-2 text-blue-300 font-bold text-[10px] uppercase">
+                  <span className="bg-white/10 px-2 py-0.5 rounded tracking-widest font-mono">
+                    KATEGORI: {location?.type || 'umum'}
+                  </span>
+                  <span>•</span>
+                  <span className="tracking-widest italic text-white/50">Matrix Monitoring Bulanan</span>
+                </div>
+                <div className="flex items-center gap-2 text-green-400 font-black text-[11px] uppercase mt-1">
+                  <UserCheck size={14} />
+                  <span className="tracking-tight italic">Petugas: {getWorkerNames()}</span>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/10 p-2 rounded-xl">
+          <div className="flex gap-2 bg-white/5 p-2 rounded-2xl border border-white/10">
             <select 
               value={selectedMonth} 
               onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-              className="bg-transparent text-white text-xs font-black outline-none cursor-pointer uppercase"
+              className="bg-transparent text-white text-xs font-black outline-none cursor-pointer p-2 uppercase"
             >
               {Array.from({length:12}, (_,i)=> (
-                <option key={i+1} value={i+1} className="text-black">{new Date(0, i).toLocaleString('id-ID', {month:'long'})}</option>
+                <option key={i+1} value={i+1} className="text-black">
+                  {new Date(0, i).toLocaleString('id-ID', {month:'long'})}
+                </option>
               ))}
             </select>
             <select 
               value={selectedYear} 
               onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-              className="bg-transparent text-white text-xs font-black outline-none cursor-pointer"
+              className="bg-transparent text-white text-xs font-black outline-none cursor-pointer p-2"
             >
-              <option value={2025} className="text-black">2025</option>
               <option value={2026} className="text-black">2026</option>
+              <option value={2025} className="text-black">2025</option>
             </select>
           </div>
         </div>
       </div>
 
-      <div className="p-4 max-w-[100rem] mx-auto">
-        <div className="overflow-x-auto border-2 border-slate-200 rounded-lg shadow-sm">
+      <div className="p-6 max-w-[100rem] mx-auto">
+        <div className="overflow-x-auto border-4 border-slate-100 rounded-[2rem] shadow-2xl bg-white">
           <table className="w-full border-collapse text-[10px]">
             <thead>
-              {/* Baris Tanggal */}
-              <tr className="bg-slate-100">
-                <th rowSpan={2} className="border-2 border-slate-200 p-2 min-w-[150px] text-center uppercase font-black">Item Pekerjaan</th>
-                <th colSpan={daysInMonth} className="border-2 border-slate-200 p-1 text-center uppercase font-black tracking-[0.3em] bg-slate-200">
+              <tr className="bg-slate-50">
+                <th rowSpan={2} className="border border-slate-200 p-4 min-w-[200px] text-left uppercase font-black italic text-slate-400">
+                  Item Pekerjaan ({location?.type})
+                </th>
+                <th colSpan={daysInMonth} className="border border-slate-200 p-2 text-center uppercase font-black tracking-[0.4em] bg-[#001f3f] text-white">
                   Tanggal ({new Date(0, selectedMonth-1).toLocaleString('id-ID', {month:'long'})} {selectedYear})
                 </th>
               </tr>
-              <tr className="bg-slate-50">
+              <tr className="bg-slate-100">
                 {dateArray.map(day => (
-                  <th key={day} className={`border border-slate-200 p-1 text-center font-bold min-w-[30px] ${isWeekend(day) ? 'bg-red-500 text-white' : ''}`}>
+                  <th key={day} className={`border border-slate-200 p-2 text-center font-black min-w-[35px] ${isWeekend(day) ? 'bg-red-500 text-white' : 'text-slate-600'}`}>
                     {day}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {tasks.map((task) => (
-                <tr key={task.id} className="hover:bg-blue-50 transition-colors">
-                  <td className="border border-slate-200 p-2 font-black uppercase text-slate-700 bg-slate-50">
-                    {task.task_name}
+              {tasks.length === 0 ? (
+                <tr>
+                  <td colSpan={daysInMonth + 1} className="p-20 text-center font-black text-slate-300 uppercase italic text-lg tracking-widest">
+                    Tidak ada template untuk kategori {location?.type}
                   </td>
-                  {dateArray.map(day => {
-                    const status = getCheckStatus(task.id, day);
-                    const weekend = isWeekend(day);
-                    
-                    return (
-                      <td 
-                        key={day} 
-                        className={`border border-slate-200 text-center p-0 h-10 ${weekend ? 'bg-red-50' : ''}`}
-                      >
-                        {status === 'checked' && <span className="text-green-600 font-black text-lg">✓</span>}
-                        {status === 'unchecked' && <span className="text-red-400 font-bold">x</span>}
-                        {weekend && !status && <div className="w-full h-full bg-red-100/50"></div>}
-                      </td>
-                    );
-                  })}
                 </tr>
-              ))}
-              {/* Baris Jam (Opsional: Mengambil jam rata-rata atau jam pertama log hari itu) */}
-              <tr className="bg-slate-100 font-bold">
-                <td className="border border-slate-200 p-2 uppercase italic">Jam Cek</td>
+              ) : (
+                tasks.map((task) => (
+                  <tr key={task.id} className="group hover:bg-blue-50/50 transition-all">
+                    <td className="border border-slate-100 p-3 font-black uppercase italic text-slate-700 bg-slate-50/50 sticky left-0 z-10 group-hover:text-blue-600">
+                      {task.task_name}
+                    </td>
+                    {dateArray.map(day => {
+                      const status = getCheckStatus(task.id, day);
+                      const weekend = isWeekend(day);
+                      return (
+                        <td key={day} className={`border border-slate-100 text-center p-0 h-12 transition-all ${weekend ? 'bg-red-50/30' : ''}`}>
+                          {status === 'checked' ? (
+                            <div className="flex items-center justify-center">
+                               <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center text-green-600 font-black shadow-sm">✓</div>
+                            </div>
+                          ) : status === 'unchecked' ? (
+                            <span className="text-red-300 font-bold opacity-30">x</span>
+                          ) : null}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))
+              )}
+              <tr className="bg-slate-50 font-black text-slate-400">
+                <td className="border border-slate-200 p-3 uppercase italic text-left">Waktu Ceklist</td>
                 {dateArray.map(day => {
                    const logAtDay = logs.find(l => new Date(l.created_at).getDate() === day);
                    return (
-                     <td key={day} className="border border-slate-200 p-1 text-center text-[8px] rotate-[-45deg] sm:rotate-0">
-                       {logAtDay ? new Date(logAtDay.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-'}
+                     <td key={day} className="border border-slate-200 p-1 text-center text-[8px]">
+                       {logAtDay ? (
+                         <span className="text-blue-600 font-bold">
+                           {new Date(logAtDay.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                         </span>
+                       ) : '-'}
                      </td>
                    )
                 })}
@@ -179,26 +223,17 @@ function RoomMonitoringContent() {
           </table>
         </div>
 
-        {/* LEGENDA */}
-        <div className="mt-6 flex gap-6 items-center border-t pt-4">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-red-500 rounded"></div>
-            <span className="text-[10px] font-black uppercase italic">Sabtu & Minggu (Libur)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-green-600 font-black text-sm">✓</span>
-            <span className="text-[10px] font-black uppercase italic">Selesai Dikerjakan</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-red-400 font-black text-sm">x</span>
-            <span className="text-[10px] font-black uppercase italic">Tidak Dikerjakan / Belum</span>
-          </div>
+        <div className="mt-8 flex flex-wrap gap-8 items-center bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
+           <div className="flex items-center gap-3">
+              <div className="w-4 h-4 bg-red-500 rounded-md shadow-lg shadow-red-200"></div>
+              <span className="text-[10px] font-black uppercase italic text-slate-500">Libur (Sabtu/Minggu)</span>
+           </div>
+           <div className="flex items-center gap-3">
+              <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center text-green-600 font-black text-xs">✓</div>
+              <span className="text-[10px] font-black uppercase italic text-slate-500">Pekerjaan Selesai</span>
+           </div>
+           <p className="text-[10px] font-bold text-slate-400 ml-auto uppercase tracking-widest italic">KPPN Lhokseumawe • 2026</p>
         </div>
-      </div>
-
-      {/* FOOTER */}
-      <div className="mt-12 p-8 text-center border-t border-slate-100">
-        <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.5em]">Digital Hygiene Monitoring System • KPPN Lhokseumawe</p>
       </div>
     </div>
   );
@@ -206,7 +241,7 @@ function RoomMonitoringContent() {
 
 export default function RoomMonitoringPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center font-black animate-pulse text-blue-600">LOADING MATRIX...</div>}>
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center font-black animate-pulse text-blue-600 uppercase tracking-widest text-xs">Memuat Matrix...</div>}>
       <RoomMonitoringContent />
     </Suspense>
   );
