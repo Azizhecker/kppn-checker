@@ -59,11 +59,20 @@ function RoomMonitoringContent() {
     if (!printRef.current) return;
 
     try {
+      // 1. Simpan gaya asli dan paksa lebar elemen ke ukuran desktop/landscape tetap
+      // Ini memastikan html2canvas merender dengan layout yang sama di HP maupun Laptop
+      const originalStyle = printRef.current.style.width;
+      printRef.current.style.width = "1600px"; // Ukuran lebar tetap agar kolom tidak menumpuk
+
       const canvas = await html2canvas(printRef.current, { 
-        scale: 3, 
+        scale: 2, // Scale 2 sudah cukup tajam dan menjaga ukuran file tetap ringan
         useCORS: true,
-        backgroundColor: "#ffffff"
+        backgroundColor: "#ffffff",
+        windowWidth: 1600, // Memaksa canvas menganggap jendela berukuran lebar
       });
+
+      // 2. Kembalikan gaya asli setelah render selesai
+      printRef.current.style.width = originalStyle;
 
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF({
@@ -76,7 +85,8 @@ function RoomMonitoringContent() {
       const pdfHeight = pdf.internal.pageSize.getHeight();
       
       const imgProps = pdf.getImageProperties(imgData);
-      const ratio = Math.min(pdfWidth / imgProps.width, (pdfHeight - 20) / imgProps.height);
+      // Rasio disesuaikan agar pas dengan margin A4
+      const ratio = Math.min(pdfWidth / imgProps.width, (pdfHeight - 10) / imgProps.height);
       
       const width = imgProps.width * ratio;
       const height = imgProps.height * ratio;
