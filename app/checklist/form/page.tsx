@@ -44,24 +44,21 @@ function ChecklistFormContent() {
   }, [selectedLocation, locations]);
 
   async function fetchFilteredTasks() {
-    const loc = locations.find(l => l.id === selectedLocation);
-    if (!loc) return;
+  const loc = locations.find(l => l.id === selectedLocation);
+  if (!loc) return;
 
-    let query = supabase.from('task_templates').select('*');
+  // Mengambil tugas yang kategorinya SAMA dengan tipe lokasi 
+  // ATAU yang kategorinya adalah 'umum' (tugas wajib semua ruangan)
+  const { data: tsks } = await supabase
+    .from('task_templates')
+    .select('*')
+    .in('category', [loc.type, 'umum']); // loc.type akan berisi kategori apa pun yang anda buat
 
-    // Filter berdasarkan kategori toilet atau umum
-    if (loc?.type === 'toilet') {
-      query = query.in('category', ['toilet', 'umum']);
-    } else {
-      query = query.eq('category', 'umum');
-    }
-
-    const { data: tsks } = await query;
-    if (tsks) {
-        setTasks(tsks);
-        setCheckedIds([]); 
-    }
+  if (tsks) {
+    setTasks(tsks);
+    setCheckedIds([]); 
   }
+}
 
   const handleCheckAll = () => {
     if (checkedIds.length === tasks.length) {
