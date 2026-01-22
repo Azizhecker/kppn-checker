@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { MapPin, UserCheck, Download } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { QRCodeSVG } from 'qrcode.react'; // Pastikan sudah install: npm install qrcode.react
 
 function RoomMonitoringContent() {
   const searchParams = useSearchParams();
@@ -19,11 +20,15 @@ function RoomMonitoringContent() {
   
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [currentUrl, setCurrentUrl] = useState('');
 
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const dateArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setCurrentUrl(window.location.href);
+    }
     if (locId) fetchData();
   }, [locId, selectedMonth, selectedYear]);
 
@@ -41,7 +46,8 @@ function RoomMonitoringContent() {
       setTasks(taskData || []);
     }
 
-    const firstDay = new Date(selectedYear, selectedMonth - 1, 1).toISOString();
+    // Pastikan rentang waktu mencakup seluruh hari di bulan tersebut (00:00:00 sampai 23:59:59)
+    const firstDay = new Date(selectedYear, selectedMonth - 1, 1, 0, 0, 0).toISOString();
     const lastDay = new Date(selectedYear, selectedMonth, 0, 23, 59, 59).toISOString();
 
     const { data: logsData } = await supabase
@@ -57,52 +63,39 @@ function RoomMonitoringContent() {
 
   const exportToPDF = async () => {
     if (!printRef.current) return;
-
     try {
-      // 1. Simpan gaya asli dan paksa lebar elemen ke ukuran desktop/landscape tetap
-      // Ini memastikan html2canvas merender dengan layout yang sama di HP maupun Laptop
       const originalStyle = printRef.current.style.width;
-      printRef.current.style.width = "1600px"; // Ukuran lebar tetap agar kolom tidak menumpuk
+      printRef.current.style.width = "1600px"; 
 
       const canvas = await html2canvas(printRef.current, { 
-        scale: 2, // Scale 2 sudah cukup tajam dan menjaga ukuran file tetap ringan
+        scale: 2, 
         useCORS: true,
         backgroundColor: "#ffffff",
-        windowWidth: 1600, // Memaksa canvas menganggap jendela berukuran lebar
+        windowWidth: 1600,
       });
 
-      // 2. Kembalikan gaya asli setelah render selesai
       printRef.current.style.width = originalStyle;
-
       const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'mm',
-        format: 'a4'
-      });
-
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
-      
       const imgProps = pdf.getImageProperties(imgData);
-      // Rasio disesuaikan agar pas dengan margin A4
       const ratio = Math.min(pdfWidth / imgProps.width, (pdfHeight - 10) / imgProps.height);
-      
       const width = imgProps.width * ratio;
       const height = imgProps.height * ratio;
-
-      const x = (pdfWidth - width) / 2;
-      const y = (pdfHeight - height) / 2;
-
-      pdf.addImage(imgData, 'PNG', x, y, width, height);
+      pdf.addImage(imgData, 'PNG', (pdfWidth - width) / 2, (pdfHeight - height) / 2, width, height);
       pdf.save(`Monitoring_${location?.name}_${selectedMonth}_${selectedYear}.pdf`);
     } catch (error) {
       console.error("Gagal mengekspor PDF:", error);
     }
   };
 
+  const getLogAtDay = (day: number) => {
+    return logs.find(l => new Date(l.created_at).getDate() === day);
+  };
+
   const getCheckStatus = (taskId: number, day: number) => {
-    const logAtDay = logs.find(l => new Date(l.created_at).getDate() === day);
+    const logAtDay = getLogAtDay(day);
     if (!logAtDay) return null;
     const item = logAtDay.checklist_items?.find((i: any) => i.task_id === taskId);
     return item?.is_completed ? 'checked' : 'unchecked';
@@ -116,69 +109,74 @@ function RoomMonitoringContent() {
   if (loading) return <div className="min-h-screen flex items-center justify-center font-black animate-pulse text-blue-600">MENYINKRONKAN...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-100 p-8">
-      {/* Tombol Kontrol */}
-      <div className="max-w-[110rem] mx-auto mb-6 flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm no-print">
-        <div className="flex gap-4">
-            <select value={selectedMonth} onChange={(e) => setSelectedMonth(parseInt(e.target.value))} className="border p-2 rounded-lg font-bold text-sm">
+    <div className="min-h-screen bg-slate-100 p-2 md:p-8"> {/* Padding diperkecil di HP */}
+      
+      {/* HEADER NAV - Dibuat Flex Col di HP agar tidak berantakan */}
+      <div className="w-full max-w-[105rem] mx-auto mb-6 flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl shadow-sm gap-4 no-print">
+        <div className="flex gap-2 w-full md:w-auto">
+            <select value={selectedMonth} onChange={(e) => setSelectedMonth(parseInt(e.target.value))} className="flex-1 md:flex-none border p-2 rounded-lg font-bold text-sm text-black bg-white">
                 {Array.from({length:12}, (_,i)=> (
                     <option key={i+1} value={i+1}>{new Date(0, i).toLocaleString('id-ID', {month:'long'})}</option>
                 ))}
             </select>
-            <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))} className="border p-2 rounded-lg font-bold text-sm text-black">
+            <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))} className="flex-1 md:flex-none border p-2 rounded-lg font-bold text-sm text-black bg-white">
                 <option value={2025}>2025</option>
                 <option value={2026}>2026</option>
             </select>
         </div>
-        <button onClick={exportToPDF} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl font-bold flex items-center gap-2 transition-all">
-          <Download size={18} /> Export PDF Resmi
+        <button onClick={exportToPDF} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl font-bold flex items-center justify-center gap-2 transition-all">
+          <Download size={18} /> <span className="text-sm">Export PDF Resmi</span>
         </button>
       </div>
 
-      {/* AREA PRINT - Disesuaikan dengan margin dan layout baru */}
-      <div ref={printRef} className="bg-white p-12 shadow-2xl mx-auto w-full max-w-[105rem] text-black border border-slate-200" style={{ minHeight: '210mm' }}>
-        
-        {/* Judul Monitoring */}
-        <div className="text-center mb-10 mt-4">
-          <h3 className="text-xl font-black uppercase tracking-wider">Monitoring Pelaksanaan Tugas Cleaning Service KPPN LHOKSEUMAWE</h3>
-          <p className="text-sm font-bold uppercase mt-2">Periode: {new Date(0, selectedMonth-1).toLocaleString('id-ID', {month:'long'})} {selectedYear}</p>
-          <p className="text-sm font-bold uppercase mt-1">Ruangan: {location?.name}</p>
+      {/* KONTEN UTAMA */}
+      <div 
+        ref={printRef} 
+        className="bg-white p-4 md:p-12 shadow-2xl mx-auto w-full max-w-[105rem] text-black border border-slate-200" 
+        style={{ minHeight: '210mm' }}
+      >
+        <div className="text-center mb-6 md:mb-10 mt-4 px-2">
+          <h3 className="text-sm md:text-xl font-black uppercase tracking-wider leading-tight">
+            Monitoring Pelaksanaan Tugas Cleaning Service KPPN LHOKSEUMAWE
+          </h3>
+          <p className="text-[10px] md:text-sm font-bold uppercase mt-2">Periode: {new Date(0, selectedMonth-1).toLocaleString('id-ID', {month:'long'})} {selectedYear}</p>
+          <p className="text-[10px] md:text-sm font-bold uppercase mt-1">Ruangan: {location?.name}</p>
         </div>
 
-        {/* Matrix Tabel */}
-        <div className="overflow-x-auto mb-10">
-          <table className="w-full border-collapse border-[1.5px] border-black text-[10px]">
+        {/* CONTAINER TABEL - Penting untuk scroll di HP */}
+        <div className="overflow-x-auto border-2 border-black rounded-sm">
+          <table className="w-full border-collapse text-[8px] md:text-[10px]">
             <thead>
               <tr className="bg-slate-50">
-                <th className="border-2 border-black p-2 w-10">No</th>
-                <th className="border-2 border-black p-2 text-left min-w-[250px]">Kegiatan Pekerjaan</th>
+                <th className="border-r-2 border-b-2 border-black p-1 w-6">No</th>
+                <th className="border-r-2 border-b-2 border-black p-1 text-left min-w-[120px] md:min-w-[250px]">Kegiatan Pekerjaan</th>
                 {dateArray.map(day => (
-                  <th key={day} className={`border-2 border-black p-1 text-center w-8 ${isWeekend(day) ? 'bg-red-50 text-red-600' : ''}`}>{day}</th>
+                  <th key={day} className={`border-r-2 border-b-2 border-black p-0.5 text-center w-5 md:w-8 ${isWeekend(day) ? 'bg-red-100 text-red-600' : ''}`}>{day}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {tasks.map((task, idx) => (
                 <tr key={task.id}>
-                  <td className="border-2 border-black text-center p-2 font-medium">{idx + 1}</td>
-                  <td className="border-2 border-black p-2 font-bold uppercase">{task.task_name}</td>
+                  <td className="border-r-2 border-b-2 border-black text-center p-1 font-medium">{idx + 1}</td>
+                  <td className="border-r-2 border-b-2 border-black p-1 font-bold uppercase whitespace-normal">{task.task_name}</td>
                   {dateArray.map(day => {
                     const status = getCheckStatus(task.id, day);
                     return (
-                      <td key={day} className={`border-2 border-black text-center p-0 h-11 ${isWeekend(day) ? 'bg-red-50/30' : ''}`}>
-                        {status === 'checked' ? <span className="text-blue-700 font-bold text-xl leading-none">✓</span> : status === 'unchecked' ? <span className="text-red-500 font-bold text-sm">x</span> : ''}
+                      <td key={day} className={`border-r-2 border-b-2 border-black text-center p-0 h-8 md:h-11 ${isWeekend(day) ? 'bg-red-50/30' : ''}`}>
+                        {status === 'checked' ? <span className="text-blue-700 font-bold text-xs md:text-xl leading-none">✓</span> : status === 'unchecked' ? <span className="text-red-500 font-bold text-[8px] md:text-sm">x</span> : ''}
                       </td>
                     );
                   })}
                 </tr>
               ))}
               <tr className="bg-slate-50">
-                <td colSpan={2} className="border-2 border-black p-2 font-bold italic uppercase text-right bg-slate-100">Status Approval (Petugas/Pegawai)</td>
+                <td colSpan={2} className="border-r-2 border-black p-1 font-bold italic uppercase text-right bg-slate-100 text-[7px] md:text-[10px]">Status Approval</td>
                 {dateArray.map(day => {
-                  const logAtDay = logs.find(l => new Date(l.created_at).getDate() === day);
-                  const isApproved = logAtDay?.status === 'Disetujui';
+                  const logAtDay = getLogAtDay(day);
+                  const isApproved = logAtDay?.status?.toLowerCase() === 'disetujui';
                   return (
-                    <td key={day} className="border-2 border-black p-1 text-center font-black text-[8px]">
+                    <td key={day} className="border-r-2 border-black p-0 text-center font-black text-[6px] md:text-[8px]">
                       {logAtDay ? (
                         <span className={isApproved ? 'text-green-600' : 'text-orange-500'}>
                           {isApproved ? 'OK' : 'PND'}
@@ -192,24 +190,30 @@ function RoomMonitoringContent() {
           </table>
         </div>
 
-        {/* Footer Tanda Tangan - Perbaikan Posisi Nama agar Center & Tidak Terkena Garis */}
-        <div className="mt-16 grid grid-cols-2 text-center text-sm px-20">
+        {/* TANDA TANGAN - Dibuat responsif */}
+        <div className="mt-12 md:mt-16 grid grid-cols-2 text-center text-[10px] md:text-sm px-2 md:px-20 gap-4">
           <div className="flex flex-col items-center">
-            <p className="font-bold mb-16">Dikerjakan Oleh:</p>
-            <div className="w-64 flex flex-col items-center">
-              <span className="font-black italic uppercase border-b-2 border-black w-full pb-1 mb-1">
+            <p className="font-bold mb-2">Dikerjakan Oleh:</p>
+            <div className="mb-2 scale-75 md:scale-100">
+                <QRCodeSVG value={currentUrl} size={48} md-size={64} />
+            </div>
+            <div className="w-full md:w-64 flex flex-col items-center px-1">
+              <span className="font-black italic uppercase border-b border-black w-full pb-1 mb-1 truncate text-[9px] md:text-sm">
                 {logs.length > 0 ? logs[0].worker_name : '................................'}
               </span>
               <p className="font-bold">Cleaning Service</p>
             </div>
           </div>
           <div className="flex flex-col items-center">
-            <p className="font-bold mb-16">Diperiksa Oleh:</p>
-            <div className="w-64 flex flex-col items-center">
-              <span className="font-black uppercase border-b-2 border-black w-full pb-1 mb-1">
+            <p className="font-bold mb-2">Diperiksa Oleh:</p>
+            <div className="mb-2 scale-75 md:scale-100">
+                <QRCodeSVG value={currentUrl} size={48} md-size={64} />
+            </div>
+            <div className="w-full md:w-64 flex flex-col items-center px-1">
+              <span className="font-black uppercase border-b border-black w-full pb-1 mb-1 truncate text-[9px] md:text-sm">
                 MUHAMMAD ICHSAN RIDWAN
               </span>
-              <p className="font-bold italic text-xs">NIP 199903092018121003</p>
+              <p className="font-bold italic text-[8px] md:text-xs">NIP 199903092018121003</p>
             </div>
           </div>
         </div>
