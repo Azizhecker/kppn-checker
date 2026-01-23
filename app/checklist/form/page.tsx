@@ -44,21 +44,28 @@ function ChecklistFormContent() {
   }, [selectedLocation, locations]);
 
   async function fetchFilteredTasks() {
-  const loc = locations.find(l => l.id === selectedLocation);
-  if (!loc) return;
+    const loc = locations.find(l => l.id === selectedLocation);
+    if (!loc) return;
 
-  // Mengambil tugas yang kategorinya SAMA dengan tipe lokasi 
-  // ATAU yang kategorinya adalah 'umum' (tugas wajib semua ruangan)
-  const { data: tsks } = await supabase
-    .from('task_templates')
-    .select('*')
-    .in('category', [loc.type, 'umum']); // loc.type akan berisi kategori apa pun yang anda buat
+    let query = supabase.from('task_templates').select('*');
 
-  if (tsks) {
-    setTasks(tsks);
-    setCheckedIds([]); 
+    // LOGIKA EKSKLUSIF:
+    if (loc.type === 'toilet') {
+
+      // Jika Anda ingin toilet HANYA muncul tugas toilet saja, ganti menjadi: .eq('category', 'toilet')
+      query = query.in('category', ['toilet']);
+    } 
+    else {
+      query = query.eq('category', loc.type);
+    }
+
+    const { data: tsks } = await query;
+    
+    if (tsks) {
+      setTasks(tsks);
+      setCheckedIds([]); 
+    }
   }
-}
 
   const handleCheckAll = () => {
     if (checkedIds.length === tasks.length) {
@@ -126,7 +133,7 @@ function ChecklistFormContent() {
       {/* 2. Pemilihan Lokasi - MANUAL */}
       <div className="bg-white p-6 rounded-3xl shadow-sm border mb-4">
         <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 mb-3">
-          <MapPin size={12}/> Pilih Ruangan
+          <MapPin size={12}/> Pilih Ruangan/Kendaraan
         </label>
         <select 
           className="w-full p-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-500 transition-all text-slate-700 appearance-none cursor-pointer"

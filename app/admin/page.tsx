@@ -325,7 +325,6 @@ export default function AdminPage() {
                 <MapPin size={18} className="text-blue-500"/> Ruangan Baru
               </h3>
               <div className="space-y-4">
-                <input placeholder="ID (Manual/Otomatis)" value={newLoc.id} onChange={e=>setNewLoc({...newLoc, id: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-2 ring-blue-500 transition-all"/>
                 <input placeholder="Nama Ruangan" value={newLoc.name} onChange={e=>setNewLoc({...newLoc, name: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-2 ring-blue-500 transition-all"/>
                 <select value={newLoc.type} onChange={e=>setNewLoc({...newLoc, type: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-bold outline-none uppercase cursor-pointer">
                   {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}

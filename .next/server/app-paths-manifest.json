@@ -1,5 +1,7 @@
 {
-  "/monitoring/page": "app/monitoring/page.js",
+  "/page": "app/page.js",
+  "/checklist/form/page": "app/checklist/form/page.js",
   "/admin/page": "app/admin/page.js",
-  "/page": "app/page.js"
+  "/monitoring/page": "app/monitoring/page.js",
+  "/dashboard-cs/page": "app/dashboard-cs/page.js"
 }
