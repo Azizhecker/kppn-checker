@@ -1,11 +1,13 @@
 'use client';
+import ProtectedRoute from '@/components/ProtectedRoute';
 import QRCode from "react-qr-code";
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   Check, X, ClipboardList, LayoutDashboard, 
   MapPin, ListChecks, Trash2, LogOut, ChevronRight, 
-  CheckCircle2, Download, User, CheckSquare, Tags, PlusCircle
+  CheckCircle2, Download, User, CheckSquare, Tags, PlusCircle,
+  Filter, Briefcase, ShieldCheck, Clock, MessageSquare, ExternalLink
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
@@ -18,7 +20,6 @@ export default function AdminPage() {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
-  // STATE KATEGORI DINAMIS
   const [categories, setCategories] = useState<string[]>(['umum', 'toilet']);
   const [newCategoryName, setNewCategoryName] = useState('');
 
@@ -26,6 +27,7 @@ export default function AdminPage() {
   const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().substring(0, 7));
 
+  // State ID dikosongkan karena akan diisi otomatis sistem
   const [newLoc, setNewLoc] = useState({ id: '', name: '', type: 'umum' });
   const [newTask, setNewTask] = useState({ name: '', category: 'umum' });
 
@@ -45,25 +47,19 @@ export default function AdminPage() {
     setLocations(locs || []);
     setAllTasks(tsks || []);
 
-    // Sinkronisasi kategori dari Database
     const dbCategoriesFromTasks = tsks?.map(t => t.category.toLowerCase()) || [];
     const dbCategoriesFromLocs = locs?.map(l => l.type.toLowerCase()) || [];
     const combined = Array.from(new Set(['umum', 'toilet', ...dbCategoriesFromTasks, ...dbCategoriesFromLocs]));
     setCategories(combined);
-
     setIsLoading(false);
   }
 
-  const handleAddCategory = () => {
-    if (!newCategoryName) return;
-    const formattedCat = newCategoryName.toLowerCase().trim();
-    if (!categories.includes(formattedCat)) {
-      setCategories([...categories, formattedCat]);
-      alert(`Kategori "${formattedCat}" ditambahkan sementara. Akan permanen jika digunakan pada Lokasi/Task baru.`);
-      setNewCategoryName('');
-    }
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/');
   };
 
+  // --- FUNGSI MONITORING ---
   async function fetchLogs() {
     let query = supabase
       .from('checklist_logs')
@@ -90,53 +86,64 @@ export default function AdminPage() {
     setLogs(data || []);
   }
 
+  const handleApprove = async (logId: string) => {
+    const { error } = await supabase.from('checklist_logs').update({ status: 'DISETUJUI' }).eq('id', logId);
+    if (!error) fetchLogs();
+  };
+
   const handleApproveAll = async () => {
     const pendingLogs = logs.filter(l => l.status !== 'DISETUJUI').map(l => l.id);
     if (pendingLogs.length === 0) return alert("Semua data sudah disetujui.");
-    
     if (confirm(`Setujui ${pendingLogs.length} laporan sekaligus?`)) {
       const { error } = await supabase.from('checklist_logs').update({ status: 'DISETUJUI' }).in('id', pendingLogs);
       if (!error) fetchLogs();
     }
   };
 
-  const handleApprove = async (logId: string) => {
-    const { error } = await supabase.from('checklist_logs').update({ status: 'DISETUJUI' }).eq('id', logId);
-    if (!error) fetchLogs();
-  };
-
   const exportToExcel = () => {
     const reportData = logs.map(log => ({
-      'Tanggal': new Date(log.created_at).toLocaleDateString('id-ID'),
+      'Tanggal & Waktu': new Date(log.created_at).toLocaleString('id-ID'),
       'Lokasi': log.locations?.name,
       'Petugas': log.worker_name,
-      'Pekerjaan': log.checklist_items?.map((i:any) => `${i.task_templates?.task_name}: ${i.is_completed ? 'YA' : 'TIDAK'}`).join(', '),
-      'Status': log.status || 'PENDING'
+      'Status': log.status || 'PENDING',
+      'Keterangan': log.notes || '-'
     }));
     const worksheet = XLSX.utils.json_to_sheet(reportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan");
-    XLSX.writeFile(workbook, `Laporan_KPPN_${filterDate}.xlsx`);
+    XLSX.writeFile(workbook, `Laporan_Kebersihan_${filterDate}.xlsx`);
   };
 
+  // --- FUNGSI LOKASI (DENGAN ID OTOMATIS) ---
   const handleAddLocation = async () => {
     if (!newLoc.name) return alert("Nama Ruangan wajib diisi!");
-    const generatedId = newLoc.id || `LOC-${Date.now().toString().slice(-4)}`;
-    const { error } = await supabase.from('locations').insert([{ id: generatedId.toUpperCase(), name: newLoc.name, type: newLoc.type }]);
+    
+    // GENERATE ID OTOMATIS: Gabungan LOC + 4 Angka Terakhir Waktu Sekarang
+    const generatedId = `LOC-${Date.now().toString().slice(-4)}`;
+    
+    const { error } = await supabase.from('locations').insert([{ 
+      id: generatedId.toUpperCase(), 
+      name: newLoc.name, 
+      type: newLoc.type 
+    }]);
+
     if (error) alert(error.message);
-    else { setNewLoc({ id: '', name: '', type: 'umum' }); fetchData(); }
+    else { 
+      setNewLoc({ id: '', name: '', type: 'umum' }); 
+      fetchData(); 
+    }
   };
 
-  const handleAddTask = async () => {
-    if (!newTask.name) return alert("Nama Task wajib diisi!");
-    const { error } = await supabase.from('task_templates').insert([{ task_name: newTask.name, category: newTask.category }]);
-    if (error) alert(error.message);
-    else { setNewTask({ name: '', category: 'umum' }); fetchData(); }
+  const handleDeleteLocation = async (id: string) => {
+    if (confirm('Hapus data lokasi ini?')) {
+      const { error } = await supabase.from('locations').delete().eq('id', id);
+      if (error) alert("Error: " + error.message);
+      else fetchData();
+    }
   };
 
   const downloadQR = (locId: string, locName: string) => {
     const svg = document.getElementById(`qr-${locId}`) as HTMLElement;
-    if (!svg) return;
     const svgData = new XMLSerializer().serializeToString(svg);
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
@@ -146,10 +153,8 @@ export default function AdminPage() {
       if (ctx) {
         ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 22, 40, 256, 256);
-        ctx.font = "bold 20px Inter, sans-serif"; ctx.fillStyle = "#0f172a"; ctx.textAlign = "center";
+        ctx.font = "bold 18px sans-serif"; ctx.fillStyle = "#002B5B"; ctx.textAlign = "center";
         ctx.fillText(locName.toUpperCase(), canvas.width / 2, 340);
-        ctx.font = "14px Inter, sans-serif"; ctx.fillStyle = "#64748b";
-        ctx.fillText(locId, canvas.width / 2, 365);
       }
       const link = document.createElement("a");
       link.download = `QR_${locName}.png`;
@@ -159,248 +164,300 @@ export default function AdminPage() {
     img.src = "data:image/svg+xml;base64," + btoa(svgData);
   };
 
+  const handleAddTask = async () => {
+    if (!newTask.name) return alert("Deskripsi wajib diisi!");
+    const { error } = await supabase.from('task_templates').insert([{ task_name: newTask.name, category: newTask.category }]);
+    if (error) alert(error.message);
+    else { setNewTask({ name: '', category: 'umum' }); fetchData(); }
+  };
+
+  const handleDeleteTask = async (id: number) => {
+    if (confirm('Hapus item pekerjaan ini?')) {
+      const { error } = await supabase.from('task_templates').delete().eq('id', id);
+      if (error) alert("Error: " + error.message);
+      else fetchData();
+    }
+  };
+
+  const handleAddCategory = () => {
+    if (!newCategoryName) return;
+    const formattedCat = newCategoryName.toLowerCase().trim();
+    if (!categories.includes(formattedCat)) {
+      setCategories([...categories, formattedCat]);
+      setNewCategoryName('');
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row font-sans">
-      
-      {/* SIDEBAR */}
-      <aside className="w-full md:w-72 bg-[#003366] text-white p-6 flex flex-col shadow-2xl z-20">
-        <div className="flex items-center gap-3 mb-12 px-2">
-          <div className="bg-blue-500 p-2 rounded-xl shadow-lg">
-            <ClipboardList size={24} />
+    <ProtectedRoute>
+    <div className="min-h-screen bg-[#F0F2F5] flex flex-col md:flex-row font-sans text-slate-700 text-sm">
+      {/* Sidebar Kedinasan */}
+      <aside className="w-full md:w-64 bg-[#002B5B] text-white flex flex-col shadow-xl z-20 border-r-4 border-[#E9C46A]">
+        <div className="p-6 border-b border-white/10 bg-[#001F41]">
+          <div className="flex items-center gap-3">
+            <div className="bg-[#E9C46A] p-2 rounded-lg">
+              <ShieldCheck size={20} className="text-[#002B5B]" />
+            </div>
+            <div>
+              <h1 className="font-black text-sm uppercase tracking-tighter">E-CHECKLIST</h1>
+              <p className="text-[9px] font-bold text-white/60 tracking-widest uppercase">KPPN Lhokseumawe</p>
+            </div>
           </div>
-          <h1 className="font-black text-xl tracking-tighter italic uppercase">Admin KPPN</h1>
         </div>
-        <nav className="space-y-2 flex-1">
-          <button onClick={() => setActiveTab('overview')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-sm transition-all ${activeTab === 'overview' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>
-            <LayoutDashboard size={20}/> Overview
-          </button>
-          <button onClick={() => setActiveTab('monitoring')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-sm transition-all ${activeTab === 'monitoring' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>
-            <CheckCircle2 size={20}/> Data Kebersihan
-          </button>
-          <button onClick={() => setActiveTab('categories')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-sm transition-all ${activeTab === 'categories' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>
-            <Tags size={20}/> Kelola Kategori
-          </button>
-          <button onClick={() => setActiveTab('locations')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-sm transition-all ${activeTab === 'locations' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>
-            <MapPin size={20}/> Kelola Ruangan
-          </button>
-          <button onClick={() => setActiveTab('tasks')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-sm transition-all ${activeTab === 'tasks' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}>
-            <ListChecks size={20}/> Master Task
-          </button>
+        
+        <nav className="p-4 space-y-1 flex-1">
+          {[
+            { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
+            { id: 'monitoring', label: 'Data Kebersihan', icon: CheckCircle2 },
+            { id: 'categories', label: 'Kelola Kategori', icon: Tags },
+            { id: 'locations', label: 'Kelola Ruangan', icon: MapPin },
+            { id: 'tasks', label: 'Master Task', icon: ListChecks },
+          ].map((item) => (
+            <button key={item.id} onClick={() => setActiveTab(item.id as any)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-bold text-xs transition-all uppercase tracking-wider ${activeTab === item.id ? 'bg-[#E9C46A] text-[#002B5B] shadow-lg' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}>
+              <item.icon size={16}/> {item.label}
+            </button>
+          ))}
         </nav>
-        <button onClick={() => router.push('/')} className="mt-auto flex items-center gap-4 px-5 py-4 text-red-400 font-bold text-sm hover:bg-red-500/10 rounded-2xl transition-all">
-          <LogOut size={20}/> Logout
-        </button>
+
+        <div className="p-4 border-t border-white/10">
+          <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-red-300 font-bold text-xs hover:bg-red-500/10 rounded-lg transition-all uppercase tracking-wider">
+            <LogOut size={16}/> Keluar Sistem
+          </button>
+        </div>
       </aside>
 
-      <main className="flex-1 p-6 md:p-12 overflow-y-auto">
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
-          <div>
-            <h1 className="text-3xl font-black text-slate-800 uppercase italic tracking-tighter">
-              {activeTab === 'overview' && "Dashboard Admin"}
-              {activeTab === 'monitoring' && "Monitoring Kebersihan"}
-              {activeTab === 'locations' && "Manajemen Lokasi"}
-              {activeTab === 'tasks' && "Template Pekerjaan"}
-              {activeTab === 'categories' && "Manajemen Kategori"}
-            </h1>
-            <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase tracking-[0.2em]">Digital Checker KPPN Lhokseumawe</p>
-          </div>
-
-          {activeTab === 'monitoring' && (
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex gap-2 bg-white p-2 rounded-2xl shadow-sm border border-slate-200">
-                <select value={filterType} onChange={(e:any) => setFilterType(e.target.value)} className="text-[10px] font-black px-2 outline-none uppercase cursor-pointer">
-                  <option value="daily">Harian</option>
-                  <option value="monthly">Bulanan</option>
-                </select>
-                <input type={filterType === 'daily' ? "date" : "month"} value={filterType === 'daily' ? filterDate : filterMonth} onChange={(e) => filterType === 'daily' ? setFilterDate(e.target.value) : setFilterMonth(e.target.value)} className="text-xs font-black outline-none border-l pl-3 uppercase bg-transparent"/>
-              </div>
-              {logs.some(l => l.status !== 'DISETUJUI') && (
-                <button onClick={handleApproveAll} className="flex items-center gap-2 bg-orange-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-600 transition-all shadow-lg shadow-orange-100">
-                  <CheckSquare size={16}/> Approve All
-                </button>
-              )}
-              <button onClick={exportToExcel} className="flex items-center gap-2 bg-green-600 text-white px-5 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-green-700 transition-all shadow-lg shadow-green-100">
-                <Download size={16}/> Export Excel
-              </button>
-            </div>
-          )}
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col h-screen overflow-hidden text-center">
+        <header className="bg-white border-b border-slate-200 px-8 py-4 flex justify-between items-center shadow-sm">
+          <h2 className="text-lg font-black text-[#002B5B] uppercase tracking-tight italic">
+            {activeTab === 'overview' && "Ringkasan Eksekutif"}
+            {activeTab === 'monitoring' && "Laporan Kebersihan Harian"}
+            {activeTab === 'locations' && "Daftar Inventaris Ruangan"}
+            {activeTab === 'tasks' && "Daftar Item Pekerjaan"}
+            {activeTab === 'categories' && "Klasifikasi Kategori"}
+          </h2>
         </header>
 
-        {/* TAB MONITORING */}
-        {activeTab === 'monitoring' && (
-          <div className="bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-12 text-center">No</th>
-                    <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Info Lokasi & Waktu</th>
-                    <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Detail Checklist</th>
-                    <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-48">Laporan Kendala</th>
-                    <th className="p-4 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest w-40">Verifikasi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.map((log, index) => (
-                    <tr key={log.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-all">
-                      <td className="p-4 text-center font-bold text-slate-400">{index + 1}</td>
-                      <td className="p-4">
-                        <div className="font-black text-slate-800 uppercase text-xs">{log.locations?.name}</div>
-                        <div className="flex items-center gap-1 mt-2 text-[9px] font-black text-blue-600 uppercase">
-                          <User size={10}/> {log.worker_name || 'PETUGAS CS'}
-                        </div>
-                        <div className="text-[9px] text-slate-400 font-bold mt-1 uppercase">
-                          {new Date(log.created_at).toLocaleString('id-ID')}
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
-                          {log.checklist_items?.map((item: any, idx: number) => (
-                            <div key={idx} className="flex items-center gap-2">
-                              {item.is_completed ? <Check size={10} className="text-green-500" strokeWidth={4}/> : <X size={10} className="text-red-500" strokeWidth={4}/>}
-                              <span className="text-[9px] font-bold text-slate-600 uppercase truncate max-w-[150px]">{item.task_templates?.task_name}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        {log.notes ? (
-                          <div className="text-[9px] font-bold text-red-500 bg-red-50 p-2 rounded-lg border border-red-100 uppercase italic">{log.notes}</div>
-                        ) : (
-                          <span className="text-slate-300 text-[9px] font-bold uppercase italic">- Nihil -</span>
-                        )}
-                      </td>
-                      <td className="p-4 text-center">
-                        <div className="flex flex-col items-center gap-2">
-                          <span className={`px-3 py-1 rounded-full font-black text-[8px] uppercase tracking-widest ${log.status === 'DISETUJUI' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
-                            {log.status || 'PROSES'}
-                          </span>
-                          {log.status !== 'DISETUJUI' && (
-                            <button onClick={() => handleApprove(log.id)} className="bg-[#003366] text-white px-4 py-1.5 rounded-lg font-black text-[9px] uppercase hover:scale-105 transition-all shadow-sm">Approve</button>
-                          )}
-                        </div>
-                      </td>
+        <div className="flex-1 overflow-y-auto p-8">
+          {/* TAB MONITORING */}
+          {activeTab === 'monitoring' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+              <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center justify-between font-bold">
+                 <div className="flex items-center gap-2">
+                    <Filter size={16} className="text-slate-400"/>
+                    <select value={filterType} onChange={(e:any) => setFilterType(e.target.value)} className="text-[11px] uppercase border p-1 rounded cursor-pointer">
+                      <option value="daily">Harian</option>
+                      <option value="monthly">Bulanan</option>
+                    </select>
+                    <input type={filterType === 'daily' ? "date" : "month"} value={filterType === 'daily' ? filterDate : filterMonth} onChange={(e) => filterType === 'daily' ? setFilterDate(e.target.value) : setFilterMonth(e.target.value)} className="text-[11px] border rounded p-1 font-black"/>
+                 </div>
+                 <div className="flex gap-2">
+                    <button onClick={handleApproveAll} className="flex items-center gap-2 bg-[#E9C46A] text-[#002B5B] px-4 py-2 rounded font-black text-[10px] uppercase tracking-widest hover:brightness-110 shadow-sm">
+                        <CheckSquare size={14}/> Approve All
+                    </button>
+                    <button onClick={exportToExcel} className="flex items-center gap-2 bg-[#2A9D8F] text-white px-4 py-2 rounded font-black text-[10px] uppercase tracking-widest hover:brightness-110 shadow-sm">
+                        <Download size={14}/> Export Excel
+                    </button>
+                 </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden">
+                <table className="w-full text-center">
+                  <thead>
+                    <tr className="bg-[#002B5B] text-white uppercase text-[10px] tracking-widest">
+                      <th className="p-4 w-12 border-r border-white/10">No</th>
+                      <th className="p-4 border-r border-white/10">Lokasi & Petugas</th>
+                      <th className="p-4 border-r border-white/10">Waktu Ceklist</th>
+                      <th className="p-4 border-r border-white/10">Hasil Pekerjaan</th>
+                      <th className="p-4 border-r border-white/10">Catatan CS</th>
+                      <th className="p-4">Status</th>
                     </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {logs.map((log, index) => (
+                      <tr key={log.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-4 font-bold text-slate-400 text-xs">{index + 1}</td>
+                        <td className="p-4 text-left pl-6">
+                          <p className="font-black text-[#002B5B] text-xs uppercase">{log.locations?.name}</p>
+                          <p className="text-[10px] font-bold text-blue-500 uppercase mt-1 italic">Oleh: {log.worker_name || 'Petugas'}</p>
+                        </td>
+                        <td className="p-4">
+                            <div className="flex items-center justify-center gap-1 text-[10px] font-black text-slate-600">
+                                <Clock size={12} className="text-slate-400"/>
+                                {new Date(log.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                            </div>
+                        </td>
+                        <td className="p-4">
+                           <div className="flex flex-wrap justify-center gap-1">
+                              {log.checklist_items?.map((item: any, idx: number) => (
+                                <span key={idx} className={`px-2 py-0.5 rounded text-[8px] font-black border uppercase ${item.is_completed ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                                  {item.task_templates?.task_name}
+                                </span>
+                              ))}
+                           </div>
+                        </td>
+                        <td className="p-4">
+                            {log.notes ? (
+                                <div className="flex items-center justify-center gap-1 text-[10px] text-orange-600 font-bold bg-orange-50 p-2 rounded border border-orange-100 italic">
+                                    <MessageSquare size={12}/> {log.notes}
+                                </div>
+                            ) : <span className="text-slate-300 text-[10px] italic">Tidak ada catatan</span>}
+                        </td>
+                        <td className="p-4">
+                          {log.status === 'DISETUJUI' ? (
+                            <div className="flex items-center justify-center gap-1 text-green-600 font-black text-[10px] uppercase">
+                               <CheckCircle2 size={14}/> Valid
+                            </div>
+                          ) : (
+                            <button onClick={() => handleApprove(log.id)} className="bg-[#E9C46A] text-[#002B5B] px-3 py-1 rounded font-black text-[9px] uppercase hover:scale-105 transition-all shadow-sm">Approve</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB LOCATIONS */}
+          {activeTab === 'locations' && (
+            <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in">
+              <div className="bg-[#002B5B] p-6 rounded-lg shadow-md text-white font-bold border-b-4 border-[#E9C46A]">
+                <p className="text-[10px] font-black text-white/50 uppercase tracking-[0.3em] mb-4 italic text-left">Pendaftaran Ruangan Baru (ID Dibuat Otomatis)</p>
+                <div className="flex gap-4">
+                  <input placeholder="Ketik Nama Ruangan Baru..." value={newLoc.name} onChange={e=>setNewLoc({...newLoc, name: e.target.value})} className="flex-1 bg-white/10 border border-white/20 p-3 rounded text-sm font-bold outline-none focus:bg-white focus:text-[#002B5B] uppercase transition-all placeholder:text-white/30 text-white"/>
+                  <select value={newLoc.type} onChange={e=>setNewLoc({...newLoc, type: e.target.value})} className="w-56 bg-white/10 border border-white/20 p-3 rounded text-sm font-bold outline-none uppercase text-white cursor-pointer">
+                    {categories.map(cat => <option key={cat} value={cat} className="text-slate-800 font-bold">{cat}</option>)}
+                  </select>
+                  <button onClick={handleAddLocation} className="bg-[#E9C46A] text-[#002B5B] px-8 rounded font-black text-xs uppercase tracking-widest hover:brightness-110 transition-all shadow-lg">Daftarkan Ruangan</button>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+                <div className="grid grid-cols-12 p-4 bg-slate-50 border-b border-slate-200 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">
+                  <div className="col-span-5 text-left">Deskripsi Ruangan</div>
+                  <div className="col-span-3">Klasifikasi</div>
+                  <div className="col-span-4">Opsi Kontrol</div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {locations.map(loc => (
+                    <div key={loc.id} className="grid grid-cols-12 p-4 items-center hover:bg-[#F0F7FF] transition-all border-l-4 border-transparent hover:border-[#002B5B]">
+                      <div className="col-span-5 flex items-center gap-3">
+                        <MapPin size={16} className="text-slate-300"/>
+                        <div className="text-left uppercase">
+                            <span className="font-black text-xs text-[#002B5B] block">{loc.name}</span>
+                            <span className="text-[9px] font-bold text-slate-400">ID: {loc.id}</span>
+                        </div>
+                      </div>
+                      <div className="col-span-3">
+                        <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded text-[9px] font-black uppercase tracking-widest border border-slate-200">{loc.type}</span>
+                      </div>
+                      <div className="col-span-4 flex justify-center gap-2">
+                        <button onClick={() => window.open(`/monitoring?loc=${loc.id}`, '_blank')} className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-100 rounded text-[9px] font-black uppercase hover:bg-blue-600 hover:text-white transition-all shadow-sm">
+                            <ExternalLink size={14}/> Cek Monitoring
+                        </button>
+                        <button onClick={() => downloadQR(loc.id, loc.name)} className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-600 rounded text-[9px] font-black uppercase hover:bg-[#002B5B] hover:text-white transition-all"><Download size={14}/> Cetak QR</button>
+                        <button onClick={() => handleDeleteLocation(loc.id)} className="p-2 text-slate-300 hover:text-red-600 transition-colors"><Trash2 size={16}/></button>
+                      </div>
+                      <div className="hidden"><QRCode id={`qr-${loc.id}`} value={`${typeof window !== 'undefined' ? window.location.origin : ''}/monitoring?loc=${loc.id}`} size={256}/></div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* TAB KATEGORI */}
-        {activeTab === 'categories' && (
-          <div className="max-w-2xl">
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100 mb-8">
-              <h3 className="text-slate-800 font-black text-sm uppercase italic mb-6 flex items-center gap-2">
-                <PlusCircle size={18} className="text-orange-500"/> Tambah Kategori Baru
-              </h3>
-              <div className="flex gap-3">
-                <input 
-                  placeholder="Nama Kategori (Contoh: Aula, Musholla...)" 
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  className="flex-1 bg-slate-50 p-4 rounded-2xl text-sm font-bold outline-none border-2 border-transparent focus:border-orange-400 transition-all"
-                />
-                <button onClick={handleAddCategory} className="bg-orange-500 text-white px-8 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-orange-100 hover:bg-orange-600">Simpan</button>
-              </div>
-              <p className="text-[10px] text-slate-400 font-bold mt-4 uppercase italic">* Kategori akan tersimpan permanen di database setelah digunakan pada Ruangan atau Task.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              {categories.map(cat => (
-                <div key={cat} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between group">
-                  <span className="font-black text-slate-700 uppercase tracking-wider text-xs">{cat}</span>
-                  <div className="w-2 h-2 rounded-full bg-green-500"></div>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* TAB LOCATIONS */}
-        {activeTab === 'locations' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-            <div className="lg:col-span-4 bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100 h-fit">
-              <h3 className="text-slate-800 font-black text-sm uppercase italic mb-6 flex items-center gap-2">
-                <MapPin size={18} className="text-blue-500"/> Ruangan Baru
-              </h3>
-              <div className="space-y-4">
-                <input placeholder="Nama Ruangan" value={newLoc.name} onChange={e=>setNewLoc({...newLoc, name: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-2 ring-blue-500 transition-all"/>
-                <select value={newLoc.type} onChange={e=>setNewLoc({...newLoc, type: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-bold outline-none uppercase cursor-pointer">
-                  {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                </select>
-                <button onClick={handleAddLocation} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-700 transition-all">Simpan Ruangan</button>
               </div>
             </div>
-            <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {locations.map(loc => (
-                <div key={loc.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-md flex justify-between items-start group hover:border-blue-200 transition-all relative">
-                  <div className="flex-1">
-                    <span className="text-[9px] font-black bg-blue-50 text-blue-600 px-3 py-1 rounded-full uppercase italic">{loc.type}</span>
-                    <h4 className="text-lg font-black text-slate-800 uppercase italic mt-2 flex items-center gap-2 cursor-pointer" onClick={() => router.push(`/monitoring?loc=${loc.id}`)}>{loc.name} <ChevronRight size={14}/></h4>
-                    <button onClick={() => downloadQR(loc.id, loc.name)} className="mt-4 flex items-center gap-2 bg-slate-50 hover:bg-blue-600 hover:text-white text-slate-600 px-4 py-2 rounded-xl transition-all"><Download size={14}/><span className="text-[10px] font-black uppercase">Cetak QR</span></button>
-                  </div>
-                  <button onClick={() => { if(confirm('Hapus?')) supabase.from('locations').delete().eq('id', loc.id).then(() => fetchData()) }} className="p-3 text-slate-200 hover:text-red-500 transition-all"><Trash2 size={18}/></button>
-                  <div className="hidden"><QRCode id={`qr-${loc.id}`} value={`${typeof window !== 'undefined' ? window.location.origin : ''}/monitoring?loc=${loc.id}`} size={256}/></div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* TAB TASKS */}
-        {activeTab === 'tasks' && (
-          <div className="space-y-6">
-            <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-100">
-                <div className="flex flex-col md:flex-row gap-4 items-end bg-slate-50 p-6 rounded-[2rem]">
-                    <div className="flex-1 w-full">
-                      <label className="text-[10px] font-black text-slate-400 ml-2 uppercase mb-2 block">Pekerjaan</label>
-                      <input placeholder="Contoh: Pel Lantai..." value={newTask.name} onChange={e=>setNewTask({...newTask, name: e.target.value})} className="w-full bg-white p-4 rounded-2xl text-sm font-bold outline-none shadow-sm focus:ring-2 ring-blue-500"/>
-                    </div>
-                    <div className="w-full md:w-64">
-                      <label className="text-[10px] font-black text-slate-400 ml-2 uppercase mb-2 block">Kategori</label>
-                      <select value={newTask.category} onChange={e=>setNewTask({...newTask, category: e.target.value})} className="w-full bg-white p-4 rounded-2xl text-sm font-bold outline-none uppercase cursor-pointer">
-                        {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                      </select>
-                    </div>
-                    <button onClick={handleAddTask} className="bg-slate-800 text-white px-10 py-4 rounded-2xl font-black text-xs uppercase hover:bg-black transition-all">Tambah</button>
+          {/* TAB CATEGORIES */}
+          {activeTab === 'categories' && (
+            <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in">
+              <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                <p className="text-[11px] font-black text-slate-400 uppercase mb-4 tracking-widest text-left">Klasifikasi Kategori Baru</p>
+                <div className="flex gap-2">
+                  <input placeholder="Ketik nama kategori..." value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} className="flex-1 border border-slate-200 p-3 rounded text-sm font-bold outline-none focus:border-[#002B5B] uppercase"/>
+                  <button onClick={handleAddCategory} className="bg-[#002B5B] text-white px-6 rounded font-black text-xs uppercase tracking-widest hover:bg-[#001F41]">Simpan</button>
                 </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-[450px] overflow-y-auto pr-2">
-              {allTasks.map(t => (
-                <div key={t.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-50 flex justify-between items-center group">
-                  <div className="flex items-center gap-3">
-                    <div className="w-1 h-8 rounded-full bg-blue-400"></div>
-                    <div>
-                      <h5 className="text-sm font-bold text-slate-700">{t.task_name}</h5>
-                      <p className="text-[9px] font-black text-blue-500 uppercase italic">{t.category}</p>
-                    </div>
-                  </div>
-                  <button onClick={() => { if(confirm('Hapus?')) supabase.from('task_templates').delete().eq('id', t.id).then(() => fetchData()) }} className="text-slate-200 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
+              </div>
+              <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden text-left">
+                <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">
+                  <span>Nama Klasifikasi</span>
+                  <span>Aksi</span>
                 </div>
-              ))}
+                <div className="divide-y divide-slate-100">
+                  {categories.map((cat, idx) => (
+                    <div key={idx} className="p-4 flex justify-between items-center hover:bg-slate-50/50">
+                      <div className="flex items-center gap-3 uppercase font-black text-xs text-[#002B5B]">
+                        <div className="w-1.5 h-6 rounded bg-[#E9C46A]"></div>
+                        {cat}
+                      </div>
+                      <button className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* TAB OVERVIEW */}
-        {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl">
-              <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest mb-1">Total Ruangan</p>
-              <h3 className="text-5xl font-black text-slate-800 italic">{locations.length}</h3>
+          {/* TAB TASKS */}
+          {activeTab === 'tasks' && (
+            <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in">
+              <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 font-bold text-left">
+                <p className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">Master Item Pekerjaan CS</p>
+                <div className="flex flex-col md:flex-row gap-3">
+                  <input placeholder="Contoh: Menyapu dan Pel Lantai..." value={newTask.name} onChange={e=>setNewTask({...newTask, name: e.target.value})} className="flex-1 border border-slate-200 p-3 rounded text-sm font-bold outline-none focus:border-[#002B5B] uppercase shadow-inner bg-slate-50"/>
+                  <select value={newTask.category} onChange={e=>setNewTask({...newTask, category: e.target.value})} className="w-full md:w-56 border border-slate-200 p-3 rounded text-sm font-bold outline-none uppercase bg-slate-50">
+                    {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                  <button onClick={handleAddTask} className="bg-[#002B5B] text-white px-8 py-3 rounded font-black text-xs uppercase tracking-widest hover:brightness-110 shadow-lg">Tambahkan</button>
+                </div>
+              </div>
+              <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden h-[500px] flex flex-col">
+                <div className="grid grid-cols-12 p-4 bg-[#F8FAFC] border-b border-slate-200 font-black text-[10px] text-[#002B5B] uppercase tracking-widest">
+                  <div className="col-span-6 text-left pl-4">Uraian Tugas Pekerjaan</div>
+                  <div className="col-span-4">Kategori</div>
+                  <div className="col-span-2">Aksi</div>
+                </div>
+                <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                  {allTasks.map(t => (
+                    <div key={t.id} className="grid grid-cols-12 p-4 items-center hover:bg-slate-50 transition-all border-l-4 border-transparent hover:border-[#E9C46A]">
+                      <div className="col-span-6 flex items-center gap-3">
+                         <Briefcase size={14} className="text-[#002B5B]"/>
+                         <span className="font-bold text-[11px] uppercase text-left">{t.task_name}</span>
+                      </div>
+                      <div className="col-span-4 font-black text-[9px] text-green-600 uppercase italic tracking-widest">{t.category}</div>
+                      <div className="col-span-2">
+                         <button onClick={() => handleDeleteTask(t.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl">
-              <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest mb-1">Master Task</p>
-              <h3 className="text-5xl font-black text-indigo-600 italic">{allTasks.length}</h3>
+          )}
+
+          {/* TAB OVERVIEW */}
+          {activeTab === 'overview' && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in">
+              <div className="bg-white p-8 rounded-xl border-l-8 border-[#002B5B] shadow-sm text-left">
+                <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-2">Total Unit Lokasi</p>
+                <h3 className="text-4xl font-black text-[#002B5B] italic leading-none">{locations.length} <span className="text-xs">Titik</span></h3>
+              </div>
+              <div className="bg-white p-8 rounded-xl border-l-8 border-[#E9C46A] shadow-sm text-left">
+                <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-2">Standar Pekerjaan</p>
+                <h3 className="text-4xl font-black text-[#002B5B] italic leading-none">{allTasks.length} <span className="text-xs">Items</span></h3>
+              </div>
+              <div className="bg-[#002B5B] p-8 rounded-xl shadow-lg relative overflow-hidden group">
+                 <h3 className="text-white font-black text-lg italic uppercase leading-none mb-1 text-left">Database Live</h3>
+                 <div className="mt-8 flex items-center gap-2 text-[#E9C46A] text-[10px] font-black uppercase tracking-widest">
+                    <div className="w-2 h-2 rounded-full bg-[#E9C46A] animate-pulse"></div>
+                    Sistem Online • 2026
+                 </div>
+              </div>
             </div>
-            <div className="bg-[#003366] p-8 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-between">
-              <h3 className="text-2xl font-black italic uppercase leading-tight">Database Connected</h3>
-              <div className="mt-4 flex items-center gap-2 text-green-400 text-xs font-bold uppercase"><CheckCircle2 size={16}/> System Live (2026)</div>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </main>
     </div>
+    </ProtectedRoute>
   );
 }
