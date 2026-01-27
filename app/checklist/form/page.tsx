@@ -2,7 +2,7 @@
 import { useEffect, useState, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { CheckCircle2, Send, MapPin, User, AlertCircle, Loader2 } from 'lucide-react';
+import { CheckCircle2, Send, MapPin, User, AlertCircle, Loader2, Calendar } from 'lucide-react';
 
 function ChecklistFormContent() {
   const router = useRouter();
@@ -17,24 +17,31 @@ function ChecklistFormContent() {
   const [loading, setLoading] = useState(false);
   const [notes, setNotes] = useState('');
 
-  // 1. TANGKAP NAMA DARI WEBSITE ABSENSI (STRATEGI 1)
+  // STATE BARU UNTUK TANGGAL
+  const [isManualDate, setIsManualDate] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
   useEffect(() => {
     fetchLocations();
     
-    // Ambil parameter ?worker=...
+    // 1. Ambil nama dari URL
     const nameFromUrl = searchParams.get('worker');
     if (nameFromUrl) {
-      setWorkerName(nameFromUrl.toUpperCase());
+      const formattedName = nameFromUrl.toUpperCase();
+      setWorkerName(formattedName);
+      localStorage.setItem('last_worker_name', formattedName); // Simpan ke memory
+    } else {
+      // 2. Jika tidak ada di URL, ambil dari localStorage (Ingat Nama)
+      const savedName = localStorage.getItem('last_worker_name');
+      if (savedName) setWorkerName(savedName);
     }
   }, [searchParams]);
 
-  // 2. AMBIL DAFTAR LOKASI UNTUK DIPILIH MANUAL
   async function fetchLocations() {
     const { data } = await supabase.from('locations').select('*').order('name');
     if (data) setLocations(data);
   }
 
-  // 3. FILTER TUGAS BERDASARKAN LOKASI YANG DIPILIH MANUAL
   useEffect(() => {
     if (selectedLocation) {
       fetchFilteredTasks();
@@ -48,19 +55,13 @@ function ChecklistFormContent() {
     if (!loc) return;
 
     let query = supabase.from('task_templates').select('*');
-
-    // LOGIKA EKSKLUSIF:
     if (loc.type === 'toilet') {
-
-      // Jika Anda ingin toilet HANYA muncul tugas toilet saja, ganti menjadi: .eq('category', 'toilet')
       query = query.in('category', ['toilet']);
-    } 
-    else {
+    } else {
       query = query.eq('category', loc.type);
     }
 
     const { data: tsks } = await query;
-    
     if (tsks) {
       setTasks(tsks);
       setCheckedIds([]); 
@@ -77,10 +78,16 @@ function ChecklistFormContent() {
 
   const handleSubmit = async () => {
     if (!selectedLocation) return alert("Pilih Lokasi Ruangan!");
-    if (!workerName) return alert("Identitas petugas tidak ditemukan! Silahkan masuk melalui web absensi.");
+    if (!workerName) return alert("Identitas petugas tidak ditemukan!");
     if (checkedIds.length === 0) return alert("Centang minimal satu tugas!");
 
     setLoading(true);
+
+    // LOGIKA TANGGAL: Jika manual jam disetel pagi (09:00), jika otomatis gunakan jam sekarang
+    const now = new Date();
+    const timePart = isManualDate ? "09:00:00" : `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`;
+    const finalTimestamp = `${selectedDate}T${timePart}`;
+
     try {
       const { data: log, error: logError } = await supabase
         .from('checklist_logs')
@@ -88,7 +95,8 @@ function ChecklistFormContent() {
           location_id: selectedLocation, 
           worker_name: workerName.toUpperCase(), 
           status: 'Diserahkan',
-          notes: notes 
+          notes: notes,
+          created_at: finalTimestamp // Mengirim tanggal pilihan
         }])
         .select().single();
 
@@ -103,6 +111,9 @@ function ChecklistFormContent() {
       const { error: itemError } = await supabase.from('checklist_items').insert(details);
       if (itemError) throw itemError;
 
+      // Pastikan nama tersimpan sebelum pindah halaman
+      localStorage.setItem('last_worker_name', workerName.toUpperCase());
+
       alert("Laporan Berhasil Terkirim!");
       router.push('/dashboard-cs');
     } catch (err) {
@@ -116,21 +127,56 @@ function ChecklistFormContent() {
     <div className="max-w-md mx-auto">
       <h1 className="text-xl font-black text-[#003366] uppercase italic mb-6">Formulir Kebersihan</h1>
 
-      {/* 1. Nama Petugas - OTOMATIS */}
+      {/* PILIHAN WAKTU (BARU) */}
+      <div className="bg-white p-6 rounded-3xl shadow-sm border mb-4">
+        <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 mb-3">
+          <Calendar size={12}/> Waktu Pelaporan
+        </label>
+        <div className="flex bg-slate-100 p-1 rounded-2xl mb-3">
+          <button
+            type="button"
+            onClick={() => { setIsManualDate(false); setSelectedDate(new Date().toISOString().split('T')[0]); }}
+            className={`flex-1 py-2 rounded-xl text-[10px] font-black transition-all ${!isManualDate ? 'bg-[#003366] text-white shadow-md' : 'text-slate-500'}`}
+          >
+            HARI INI
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsManualDate(true)}
+            className={`flex-1 py-2 rounded-xl text-[10px] font-black transition-all ${isManualDate ? 'bg-orange-500 text-white shadow-md' : 'text-slate-500'}`}
+          >
+            INPUT MANUAL
+          </button>
+        </div>
+        {isManualDate && (
+          <input 
+            type="date" 
+            value={selectedDate}
+            max={new Date().toISOString().split('T')[0]}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="w-full p-4 bg-orange-50 rounded-2xl border-2 border-orange-200 outline-none font-bold text-sm text-[#003366] animate-in fade-in zoom-in-95"
+          />
+        )}
+      </div>
+
+      {/* 1. Nama Petugas */}
       <div className="bg-white p-6 rounded-3xl shadow-sm border mb-4 border-l-4 border-l-blue-500">
         <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 mb-3">
           <User size={12}/> Nama Petugas
         </label>
-        <div className="flex items-center gap-3 bg-slate-100 p-4 rounded-2xl border border-slate-200">
-          <div className="bg-blue-600 text-white p-2 rounded-lg font-black text-xs">CS</div>
-          <span className="font-black text-slate-700">{workerName || "Mencari Nama..."}</span>
-        </div>
+        <input 
+          type="text"
+          value={workerName}
+          onChange={(e) => setWorkerName(e.target.value.toUpperCase())}
+          placeholder="KETIK NAMA PETUGAS..."
+          className="w-full flex items-center gap-3 bg-slate-100 p-4 rounded-2xl border border-slate-200 font-black text-slate-700 outline-none focus:ring-2 ring-blue-500"
+        />
         <p className="text-[9px] text-blue-500 font-bold mt-2 uppercase italic tracking-tighter">
-          ✓ Terkoneksi dengan Sistem Absensi
+          ✓ Nama akan tersimpan otomatis untuk laporan berikutnya
         </p>
       </div>
 
-      {/* 2. Pemilihan Lokasi - MANUAL */}
+      {/* 2. Pemilihan Lokasi */}
       <div className="bg-white p-6 rounded-3xl shadow-sm border mb-4">
         <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 mb-3">
           <MapPin size={12}/> Pilih Ruangan/Kendaraan
@@ -149,7 +195,6 @@ function ChecklistFormContent() {
 
       {selectedLocation && (
         <>
-          {/* Daftar Checklist */}
           <div className="bg-white rounded-[2rem] shadow-sm border overflow-hidden mb-4">
             <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Daftar Kelengkapan</h3>
@@ -182,7 +227,6 @@ function ChecklistFormContent() {
             ))}
           </div>
 
-          {/* Catatan */}
           <div className="bg-white p-6 rounded-3xl shadow-sm border mb-8">
             <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 mb-3">
               <AlertCircle size={12}/> Catatan/Keterangan
@@ -197,7 +241,6 @@ function ChecklistFormContent() {
         </>
       )}
 
-      {/* Tombol Kirim */}
       <button 
         disabled={loading || !selectedLocation || !workerName}
         onClick={handleSubmit}
