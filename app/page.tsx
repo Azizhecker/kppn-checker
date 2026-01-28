@@ -36,14 +36,24 @@ export default function LoginPage() {
 
       {/* Identitas Instansi */}
       <div className="mb-8 text-center z-10">
-        <div className="flex justify-center items-center gap-3 mb-4">
-           {/* Placeholder Logo Garuda/Kemenkeu */}
-          <div className="w-12 h-12 bg-[#003366] rounded-lg flex items-center justify-center shadow-lg border-b-4 border-yellow-500">
-            <ShieldCheck size={28} className="text-white" />
+        <div className="flex justify-center items-center gap-4 mb-4">
+          {/* Logo Kemenkeu */}
+          <div className="relative w-16 h-16 md:w-20 md:h-20 flex-shrink-0 animate-in fade-in slide-in-from-left-4 duration-700">
+            <img 
+              src="/Logo_kementerian_keuangan_republik_indonesia.png" // Pastikan file image_eb5a6e.png sudah Anda simpan di folder /public dengan nama ini
+              alt="Logo Kementerian Keuangan"
+              className="w-full h-full object-contain drop-shadow-md"
+            />
           </div>
-          <div className="text-left border-l-2 border-slate-300 pl-3">
-            <h2 className="text-[#003366] font-black text-xl leading-none tracking-tight">KEMENTERIAN KEUANGAN</h2>
-            <p className="text-slate-500 text-[10px] font-bold tracking-[0.1em]">REPUBLIK INDONESIA</p>
+
+          <div className="text-left border-l-2 border-slate-300 pl-4 py-1">
+            <h2 className="text-[#003366] font-regular text-xl md:text-2xl leading-[1.1] tracking-tight">
+              DITJEN PERBENDAHARAAN KEMENKEU RI
+            </h2>
+            <p className="text-slate-800 text-[10px] md:text-xs font-black tracking-[0.20em] uppercase">
+              LHOKSEUMAWE
+            </p>
+            <div className="h-1 w-16 bg-yellow-500 mt-1 rounded-full" /> {/* Aksen garis kuning khas Kemenkeu */}
           </div>
         </div>
       </div>

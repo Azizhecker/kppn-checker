@@ -128,7 +128,32 @@ function ChecklistFormContent() {
 
   return (
     <div className="max-w-md mx-auto">
-      <h1 className="text-xl font-black text-[#003366] uppercase italic mb-6">Formulir Kebersihan</h1>
+      {/* HEADER INSTANSI BARU */}
+      <div className="flex flex-col items-center mb-8 animate-in fade-in duration-700">
+        <div className="flex items-center gap-3 mb-2">
+          {/* Logo Kemenkeu */}
+          <div className="w-14 h-14 flex-shrink-0">
+            <img 
+              src="/Logo_kementerian_keuangan_republik_indonesia.png" 
+              alt="Logo Kemenkeu" 
+              className="w-full h-full object-contain"
+            />
+          </div>
+          {/* Teks Instansi */}
+          <div className="text-left border-l-2 border-slate-300 pl-4 py-1">
+            <h2 className="text-[#003366] font-regular text-xl md:text-1xl leading-[1.1] tracking-tight">
+              DITJEN PERBENDAHARAAN KEMENKEU RI
+            </h2>
+            <p className="text-slate-800 text-[10px] md:text-xs font-black tracking-[0.20em] uppercase">
+              LHOKSEUMAWE
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <h1 className="text-xl font-black text-[#003366] uppercase italic mb-6 text-center">
+        Formulir Kebersihan
+      </h1>
 
       {/* TANGGAL */}
       <div className="bg-white p-6 rounded-3xl shadow-sm border mb-4">

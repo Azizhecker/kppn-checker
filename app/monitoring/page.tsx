@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { MapPin, UserCheck, Download } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
-import { QRCodeSVG } from 'qrcode.react'; // Pastikan sudah install: npm install qrcode.react
+import { QRCodeSVG } from 'qrcode.react';
 
 function RoomMonitoringContent() {
   const searchParams = useSearchParams();
@@ -17,6 +17,9 @@ function RoomMonitoringContent() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // State untuk data admin yang sedang login
+  const [verifier, setVerifier] = useState<any>(null);
   
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -29,8 +32,31 @@ function RoomMonitoringContent() {
     if (typeof window !== 'undefined') {
       setCurrentUrl(window.location.href);
     }
-    if (locId) fetchData();
+    if (locId) {
+        fetchData();
+        fetchVerifier(); // Panggil data pemeriksa
+    }
   }, [locId, selectedMonth, selectedYear]);
+
+  // Fungsi ambil data pemeriksa (Admin)
+  async function fetchVerifier() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Ambil nama, role, dan nip dari tabel profiles
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('nama, role, nip')
+          .eq('id', user.id)
+          .single();
+        
+        if (error) throw error;
+        if (profile) setVerifier(profile);
+      }
+    } catch (err) {
+      console.error("Gagal mengambil data profil admin:", err);
+    }
+  }
 
   async function fetchData() {
     setLoading(true);
@@ -46,7 +72,6 @@ function RoomMonitoringContent() {
       setTasks(taskData || []);
     }
 
-    // Pastikan rentang waktu mencakup seluruh hari di bulan tersebut (00:00:00 sampai 23:59:59)
     const firstDay = new Date(selectedYear, selectedMonth - 1, 1, 0, 0, 0).toISOString();
     const lastDay = new Date(selectedYear, selectedMonth, 0, 23, 59, 59).toISOString();
 
@@ -109,9 +134,8 @@ function RoomMonitoringContent() {
   if (loading) return <div className="min-h-screen flex items-center justify-center font-black animate-pulse text-blue-600">SABARR YAA...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-100 p-2 md:p-8"> {/* Padding diperkecil di HP */}
+    <div className="min-h-screen bg-slate-100 p-2 md:p-8">
       
-      {/* HEADER NAV - Dibuat Flex Col di HP agar tidak berantakan */}
       <div className="w-full max-w-[105rem] mx-auto mb-6 flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl shadow-sm gap-4 no-print">
         <div className="flex gap-2 w-full md:w-auto">
             <select value={selectedMonth} onChange={(e) => setSelectedMonth(parseInt(e.target.value))} className="flex-1 md:flex-none border p-2 rounded-lg font-bold text-sm text-black bg-white">
@@ -129,7 +153,6 @@ function RoomMonitoringContent() {
         </button>
       </div>
 
-      {/* KONTEN UTAMA */}
       <div 
         ref={printRef} 
         className="bg-white p-4 md:p-12 shadow-2xl mx-auto w-full max-w-[105rem] text-black border border-slate-200" 
@@ -143,7 +166,6 @@ function RoomMonitoringContent() {
           <p className="text-[10px] md:text-sm font-bold uppercase mt-1">Ruangan: {location?.name}</p>
         </div>
 
-        {/* CONTAINER TABEL - Penting untuk scroll di HP */}
         <div className="overflow-x-auto border-2 border-black rounded-sm">
           <table className="w-full border-collapse text-[8px] md:text-[10px]">
             <thead>
@@ -190,7 +212,6 @@ function RoomMonitoringContent() {
           </table>
         </div>
 
-        {/* TANDA TANGAN - Dibuat responsif */}
         <div className="mt-12 md:mt-16 grid grid-cols-2 text-center text-[10px] md:text-sm px-2 md:px-20 gap-4">
           <div className="flex flex-col items-center">
             <p className="font-bold mb-2">Dikerjakan Oleh:</p>
@@ -211,9 +232,11 @@ function RoomMonitoringContent() {
             </div>
             <div className="w-full md:w-64 flex flex-col items-center px-1">
               <span className="font-black uppercase border-b border-black w-full pb-1 mb-1 truncate text-[9px] md:text-sm">
-                MUHAMMAD ICHSAN RIDWAN
+                {verifier ? verifier.nama : '................................'}
               </span>
-              <p className="font-bold italic text-[8px] md:text-xs">NIP 199903092018121003</p>
+              <p className="font-bold italic text-[8px] md:text-xs uppercase">
+                {verifier ? (verifier.nip ? `NIP ${verifier.nip}` : verifier.role) : '................................'}
+              </p>
             </div>
           </div>
         </div>
