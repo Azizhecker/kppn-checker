@@ -79,33 +79,42 @@ function ChecklistFormContent() {
   };
 
   // 6. Kirim Laporan
-  const handleSubmit = async () => {
-    if (!selectedLocation) return alert("Pilih Lokasi Ruangan!");
-    
-    const finalWorkerName = workerName || localStorage.getItem('last_worker_name');
-    if (!finalWorkerName) return alert("Nama petugas tidak ditemukan!");
-    
-    if (checkedIds.length === 0) return alert("Centang minimal satu tugas!");
+const handleSubmit = async () => {
+  if (!selectedLocation) return alert("Pilih Lokasi Ruangan!");
+  
+  const finalWorkerName = workerName || localStorage.getItem('last_worker_name');
+  if (!finalWorkerName) return alert("Nama petugas tidak ditemukan!");
+  
+  if (checkedIds.length === 0) return alert("Centang minimal satu tugas!");
 
-    setLoading(true);
+  setLoading(true);
 
-    const now = new Date();
-    const timePart = isManualDate ? "09:00:00" : `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`;
-    const finalTimestamp = `${selectedDate}T${timePart}`;
+  const now = new Date();
+  // Selalu ambil jam, menit, detik saat ini (real-time)
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  
+  const timePart = `${hh}:${mm}:${ss}`;
 
-    try {
-      const { data: log, error: logError } = await supabase
-        .from('checklist_logs')
-        .insert([{ 
-          location_id: selectedLocation, 
-          worker_name: finalWorkerName.toUpperCase(), 
-          status: 'Diserahkan',
-          notes: notes,
-          created_at: finalTimestamp 
-        }])
-        .select().single();
+  // finalTimestamp akan menggunakan tanggal pilihan CS (selectedDate) 
+  // namun digabung dengan jam saat ini (timePart)
+  const finalTimestamp = `${selectedDate}T${timePart}`;
+  // -----------------------
 
-      if (logError) throw logError;
+  try {
+    const { data: log, error: logError } = await supabase
+      .from('checklist_logs')
+      .insert([{ 
+        location_id: selectedLocation, 
+        worker_name: finalWorkerName.toUpperCase(), 
+        status: 'Diserahkan',
+        notes: notes,
+        created_at: finalTimestamp // Waktu sekarang dikirim dengan info timezone WIB
+      }])
+      .select().single();
+
+    if (logError) throw logError;
 
       const details = tasks.map(t => ({
         log_id: log.id,

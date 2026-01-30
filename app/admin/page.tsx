@@ -7,7 +7,7 @@ import {
   Check, X, ClipboardList, LayoutDashboard, 
   MapPin, ListChecks, Trash2, LogOut, ChevronRight, 
   CheckCircle2, Download, User, CheckSquare, Tags, PlusCircle,
-  Filter, Briefcase, ShieldCheck, Clock, MessageSquare, ExternalLink
+  Filter, Briefcase, ShieldCheck, Clock, MessageSquare, ExternalLink, AlertCircle
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
@@ -39,18 +39,34 @@ export default function AdminPage() {
     if (activeTab === 'monitoring') fetchLogs();
   }, [activeTab, filterDate, filterMonth, filterType]);
 
-  async function fetchData() {
+async function fetchData() {
     setIsLoading(true);
+    
+    // 1. Ambil Data Lokasi & Task
     const { data: locs } = await supabase.from('locations').select('*').order('name');
     const { data: tsks } = await supabase.from('task_templates').select('*').order('category');
     
     setLocations(locs || []);
     setAllTasks(tsks || []);
 
+    // 2. Ambil Logs KHUSUS HARI INI untuk keperluan Dashboard/Overview
+    const today = new Date().toISOString().split('T')[0];
+    const { data: todayLogs } = await supabase
+      .from('checklist_logs')
+      .select('location_id, status')
+      .gte('created_at', `${today}T00:00:00`)
+      .lte('created_at', `${today}T23:59:59`)
+      // Hanya anggap bersih jika statusnya DISETUJUI atau Diserahkan
+      .in('status', ['DISETUJUI', 'Diserahkan']);
+
+    setLogs(todayLogs || []); // Isi logs dengan data hari ini
+
+    // 3. Kelola Kategori
     const dbCategoriesFromTasks = tsks?.map(t => t.category.toLowerCase()) || [];
     const dbCategoriesFromLocs = locs?.map(l => l.type.toLowerCase()) || [];
     const combined = Array.from(new Set(['umum', 'toilet', ...dbCategoriesFromTasks, ...dbCategoriesFromLocs]));
     setCategories(combined);
+    
     setIsLoading(false);
   }
 
@@ -87,9 +103,13 @@ export default function AdminPage() {
   }
 
   const handleApprove = async (logId: string) => {
-    const { error } = await supabase.from('checklist_logs').update({ status: 'DISETUJUI' }).eq('id', logId);
-    if (!error) fetchLogs();
-  };
+      const { error } = await supabase.from('checklist_logs').update({ status: 'DISETUJUI' }).eq('id', logId);
+      if (!error) {
+        // Panggil fetchData agar state 'logs' terupdate dan Dashboard ikut berubah
+        fetchData(); 
+        if (activeTab === 'monitoring') fetchLogs();
+      }
+    };
 
   const handleApproveAll = async () => {
     const pendingLogs = logs.filter(l => l.status !== 'DISETUJUI').map(l => l.id);
@@ -100,19 +120,25 @@ export default function AdminPage() {
     }
   };
 
-  const exportToExcel = () => {
-    const reportData = logs.map(log => ({
-      'Tanggal & Waktu': new Date(log.created_at).toLocaleString('id-ID'),
+const exportToExcel = () => {
+  const reportData = logs.map(log => {
+    // Ambil string waktu murni dari DB
+    const rawDate = log.created_at ? log.created_at.replace('T', ' ').split('.')[0] : '-';
+    
+    return {
+      'Tanggal & Waktu': rawDate, // Akan muncul sesuai teks di database
       'Lokasi': log.locations?.name,
       'Petugas': log.worker_name,
       'Status': log.status || 'PENDING',
       'Keterangan': log.notes || '-'
-    }));
-    const worksheet = XLSX.utils.json_to_sheet(reportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan");
-    XLSX.writeFile(workbook, `Laporan_Kebersihan_${filterDate}.xlsx`);
-  };
+    };
+  });
+  
+  const worksheet = XLSX.utils.json_to_sheet(reportData);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan");
+  XLSX.writeFile(workbook, `Laporan_Kebersihan_${filterDate}.xlsx`);
+};
 
   // --- FUNGSI LOKASI (DENGAN ID OTOMATIS) ---
   const handleAddLocation = async () => {
@@ -186,6 +212,30 @@ export default function AdminPage() {
       setCategories([...categories, formattedCat]);
       setNewCategoryName('');
     }
+  };
+
+const handleReject = async (logId: string, workerName: string, roomName: string) => {
+    // Pesan konfirmasi cukup untuk internal admin saja
+    if (!confirm(`Tolak laporan dari ${workerName} di ${roomName}? CS harus mengisi ulang.`)) return;
+    
+    const { error } = await supabase
+      .from('checklist_logs')
+      .update({ status: 'DITOLAK' })
+      .eq('id', logId);
+
+    if (!error) {
+      // HAPUS bagian window.open(...)
+      // Cukup panggil fetchLogs untuk memperbarui tampilan tabel
+      fetchLogs();
+    }
+  };
+
+const getUncleanedRooms = () => {
+    // Ambil semua ID lokasi yang SUDAH dibersihkan hari ini (berdasarkan logs yang di-fetch)
+    const cleanedLocationIds = logs.map(log => log.location_id);
+    
+    // Filter lokasi yang ID-nya TIDAK ADA di dalam daftar cleanedLocationIds
+    return locations.filter(loc => !cleanedLocationIds.includes(loc.id));
   };
 
   return (
@@ -284,7 +334,18 @@ export default function AdminPage() {
                         <td className="p-4">
                             <div className="flex items-center justify-center gap-1 text-[10px] font-black text-slate-600">
                                 <Clock size={12} className="text-slate-400"/>
-                                {new Date(log.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                                {log.created_at ? (
+                                    (() => {
+                                        // log.created_at formatnya: "2026-01-30T14:30:00+00:00" atau "2026-01-30T14:30:00"
+                                        // Kita ambil cuma tanggal dan jam depannya saja
+                                        const tSep = log.created_at.split('T');
+                                        const datePart = tSep[0]; // 2026-01-30
+                                        const timePart = tSep[1].substring(0, 5); // 14:30
+                                        
+                                        const [y, m, d] = datePart.split('-');
+                                        return `${d}/${m}/${y} ${timePart}`;
+                                    })()
+                                ) : '-'}
                             </div>
                         </td>
                         <td className="p-4">
@@ -306,12 +367,29 @@ export default function AdminPage() {
                         <td className="p-4">
                           {log.status === 'DISETUJUI' ? (
                             <div className="flex items-center justify-center gap-1 text-green-600 font-black text-[10px] uppercase">
-                               <CheckCircle2 size={14}/> Valid
+                              <CheckCircle2 size={14}/> Valid
+                            </div>
+                          ) : log.status === 'DITOLAK' ? (
+                            <div className="flex items-center justify-center gap-1 text-red-500 font-black text-[10px] uppercase border border-red-200 bg-red-50 p-1 rounded">
+                              <X size={14}/> Ditolak
                             </div>
                           ) : (
-                            <button onClick={() => handleApprove(log.id)} className="bg-[#E9C46A] text-[#002B5B] px-3 py-1 rounded font-black text-[9px] uppercase hover:scale-105 transition-all shadow-sm">Approve</button>
+                            <div className="flex gap-1 justify-center">
+                              <button 
+                                onClick={() => handleApprove(log.id)} 
+                                className="bg-[#2A9D8F] text-white px-2 py-1 rounded font-black text-[9px] uppercase hover:brightness-110 shadow-sm"
+                              >
+                                Approve
+                              </button>
+                              <button 
+                                onClick={() => handleReject(log.id, log.worker_name, log.locations?.name)} 
+                                className="bg-red-500 text-white px-2 py-1 rounded font-black text-[9px] uppercase hover:brightness-110 shadow-sm"
+                              >
+                                Tolak
+                              </button>
+                            </div>
                           )}
-                        </td>
+                        </td> 
                       </tr>
                     ))}
                   </tbody>
@@ -437,21 +515,56 @@ export default function AdminPage() {
 
           {/* TAB OVERVIEW */}
           {activeTab === 'overview' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in">
-              <div className="bg-white p-8 rounded-xl border-l-8 border-[#002B5B] shadow-sm text-left">
-                <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-2">Total Unit Lokasi</p>
-                <h3 className="text-4xl font-black text-[#002B5B] italic leading-none">{locations.length} <span className="text-xs">Titik</span></h3>
-              </div>
-              <div className="bg-white p-8 rounded-xl border-l-8 border-[#E9C46A] shadow-sm text-left">
-                <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-2">Standar Pekerjaan</p>
-                <h3 className="text-4xl font-black text-[#002B5B] italic leading-none">{allTasks.length} <span className="text-xs">Items</span></h3>
-              </div>
-              <div className="bg-[#002B5B] p-8 rounded-xl shadow-lg relative overflow-hidden group">
-                 <h3 className="text-white font-black text-lg italic uppercase leading-none mb-1 text-left">Database Live</h3>
-                 <div className="mt-8 flex items-center gap-2 text-[#E9C46A] text-[10px] font-black uppercase tracking-widest">
+            <div className="space-y-6 animate-in fade-in">
+              {/* BARIS CARD ATAS */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white p-8 rounded-xl border-l-8 border-[#002B5B] shadow-sm text-left">
+                  <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-2">Total Unit Lokasi</p>
+                  <h3 className="text-4xl font-black text-[#002B5B] italic leading-none">{locations.length} <span className="text-xs">Titik</span></h3>
+                </div>
+                <div className="bg-white p-8 rounded-xl border-l-8 border-[#E9C46A] shadow-sm text-left">
+                  <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-2">Standar Pekerjaan</p>
+                  <h3 className="text-4xl font-black text-[#002B5B] italic leading-none">{allTasks.length} <span className="text-xs">Items</span></h3>
+                </div>
+                <div className="bg-[#002B5B] p-8 rounded-xl shadow-lg relative overflow-hidden group">
+                  <h3 className="text-white font-black text-lg italic uppercase leading-none mb-1 text-left">Database Live</h3>
+                  <div className="mt-8 flex items-center gap-2 text-[#E9C46A] text-[10px] font-black uppercase tracking-widest">
                     <div className="w-2 h-2 rounded-full bg-[#E9C46A] animate-pulse"></div>
                     Sistem Online • 2026
-                 </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* TAMPILAN MONITORING REAL-TIME HARI INI */}
+              <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden text-left">
+                <div className="p-4 bg-[#002B5B] text-white flex justify-between items-center">
+                  <h3 className="font-black text-xs uppercase tracking-widest flex items-center gap-2">
+                    <AlertCircle size={16} className="text-[#E9C46A]"/> Ruangan Belum Dibersihkan (Hari Ini)
+                  </h3>
+                  <span className="bg-red-500 px-3 py-1 rounded-full text-[10px] font-black italic">
+                    {getUncleanedRooms().length} LOKASI LAGI
+                  </span>
+                </div>
+                <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {getUncleanedRooms().length > 0 ? (
+                    getUncleanedRooms().map(loc => (
+                      <div key={loc.id} className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg">
+                        <div className="p-2 bg-white rounded shadow-sm text-red-500">
+                          <MapPin size={16}/>
+                        </div>
+                        <div>
+                          <p className="font-black text-[#002B5B] text-[11px] uppercase">{loc.name}</p>
+                          <p className="text-[9px] font-bold text-red-400 uppercase tracking-tighter italic">Belum Ada Laporan Valid</p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-full py-10 text-center">
+                      <CheckCircle2 size={40} className="mx-auto text-green-500 mb-2 opacity-20"/>
+                      <p className="font-black text-slate-300 uppercase italic">Semua ruangan telah dibersihkan!</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

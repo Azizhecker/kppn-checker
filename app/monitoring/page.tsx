@@ -58,11 +58,14 @@ function RoomMonitoringContent() {
     }
   }
 
-  async function fetchData() {
+async function fetchData() {
     setLoading(true);
+    
+    // 1. Ambil Data Lokasi
     const { data: locData } = await supabase.from('locations').select('*').eq('id', locId).single();
     setLocation(locData);
 
+    // 2. Ambil Template Task berdasarkan tipe lokasi
     if (locData) {
       const { data: taskData } = await supabase
         .from('task_templates')
@@ -72,13 +75,18 @@ function RoomMonitoringContent() {
       setTasks(taskData || []);
     }
 
+    // 3. Tentukan Rentang Tanggal
     const firstDay = new Date(selectedYear, selectedMonth - 1, 1, 0, 0, 0).toISOString();
     const lastDay = new Date(selectedYear, selectedMonth, 0, 23, 59, 59).toISOString();
 
+// 4. Ambil Logs (HANYA YANG 'DISETUJUI' ATAU 'Diserahkan')
     const { data: logsData } = await supabase
       .from('checklist_logs')
       .select('*, checklist_items(is_completed, task_id)')
       .eq('location_id', locId)
+      // Menggunakan .in untuk memfilter lebih dari satu status
+      // Data 'DITOLAK' otomatis tidak akan masuk karena tidak ada di daftar ini
+      .in('status', ['DISETUJUI', 'Diserahkan']) 
       .gte('created_at', firstDay)
       .lte('created_at', lastDay);
 
