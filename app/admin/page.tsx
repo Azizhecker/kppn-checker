@@ -33,42 +33,54 @@ export default function AdminPage() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [filterDate, filterMonth, filterType]);
 
   useEffect(() => {
     if (activeTab === 'monitoring') fetchLogs();
   }, [activeTab, filterDate, filterMonth, filterType]);
 
 async function fetchData() {
-    setIsLoading(true);
-    
-    // 1. Ambil Data Lokasi & Task
+  setIsLoading(true);
+  try {
+    // 1. Ambil Data Master
     const { data: locs } = await supabase.from('locations').select('*').order('name');
     const { data: tsks } = await supabase.from('task_templates').select('*').order('category');
-    
     setLocations(locs || []);
     setAllTasks(tsks || []);
 
-    // 2. Ambil Logs KHUSUS HARI INI untuk keperluan Dashboard/Overview
-    const today = new Date().toISOString().split('T')[0];
-    const { data: todayLogs } = await supabase
-      .from('checklist_logs')
-      .select('location_id, status')
-      .gte('created_at', `${today}T00:00:00`)
-      .lte('created_at', `${today}T23:59:59`)
-      // Hanya anggap bersih jika statusnya DISETUJUI atau Diserahkan
-      .in('status', ['DISETUJUI', 'Diserahkan']);
+    // 2. Tentukan Range Waktu berdasarkan Filter
+    let query = supabase.from('checklist_logs').select('location_id, status, created_at');
 
-    setLogs(todayLogs || []); // Isi logs dengan data hari ini
+    if (filterType === 'daily') {
+      // Filter Harian (00:00:00 sampai 23:59:59)
+      query = query
+        .gte('created_at', `${filterDate}T00:00:00+00:00`)
+        .lte('created_at', `${filterDate}T23:59:59+00:00`);
+    } else {
+      // Filter Bulanan (Tanggal 1 sampai hari terakhir bulan tersebut)
+      const year = filterMonth.split('-')[0];
+      const month = filterMonth.split('-')[1];
+      const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+      
+      query = query
+        .gte('created_at', `${filterMonth}-01T00:00:00+00:00`)
+        .lte('created_at', `${filterMonth}-${lastDay}T23:59:59+00:00`);
+    }
 
-    // 3. Kelola Kategori
-    const dbCategoriesFromTasks = tsks?.map(t => t.category.toLowerCase()) || [];
-    const dbCategoriesFromLocs = locs?.map(l => l.type.toLowerCase()) || [];
-    const combined = Array.from(new Set(['umum', 'toilet', ...dbCategoriesFromTasks, ...dbCategoriesFromLocs]));
-    setCategories(combined);
+    const { data: filteredLogs } = await query;
     
+    // Simpan ke state logs untuk digunakan oleh Grid di Overview
+    setLogs(filteredLogs || []);
+
+    // 3. Update Kategori
+    const combined = Array.from(new Set(['umum', 'toilet', ...(tsks?.map(t => t.category.toLowerCase()) || [])]));
+    setCategories(combined);
+  } catch (error) {
+    console.error("Error fetching data:", error);
+  } finally {
     setIsLoading(false);
   }
+}
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -286,6 +298,24 @@ const getUncleanedRooms = () => {
             {activeTab === 'tasks' && "Daftar Item Pekerjaan"}
             {activeTab === 'categories' && "Klasifikasi Kategori"}
           </h2>
+          {/* PINDAHKAN FILTER KE SINI AGAR SELALU MUNCUL */}
+          <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+            <Filter size={14} className="text-slate-400"/>
+            <select 
+              value={filterType} 
+              onChange={(e:any) => setFilterType(e.target.value)} 
+              className="text-[11px] font-bold uppercase border-none bg-transparent outline-none cursor-pointer"
+            >
+              <option value="daily">Harian</option>
+              <option value="monthly">Bulanan</option>
+            </select>
+            <input 
+              type={filterType === 'daily' ? "date" : "month"} 
+              value={filterType === 'daily' ? filterDate : filterMonth} 
+              onChange={(e) => filterType === 'daily' ? setFilterDate(e.target.value) : setFilterMonth(e.target.value)} 
+              className="text-[11px] border rounded px-2 py-1 font-black bg-white"
+            />
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-8">
@@ -513,61 +543,82 @@ const getUncleanedRooms = () => {
             </div>
           )}
 
-          {/* TAB OVERVIEW */}
-          {activeTab === 'overview' && (
-            <div className="space-y-6 animate-in fade-in">
-              {/* BARIS CARD ATAS */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-white p-8 rounded-xl border-l-8 border-[#002B5B] shadow-sm text-left">
-                  <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-2">Total Unit Lokasi</p>
-                  <h3 className="text-4xl font-black text-[#002B5B] italic leading-none">{locations.length} <span className="text-xs">Titik</span></h3>
-                </div>
-                <div className="bg-white p-8 rounded-xl border-l-8 border-[#E9C46A] shadow-sm text-left">
-                  <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-2">Standar Pekerjaan</p>
-                  <h3 className="text-4xl font-black text-[#002B5B] italic leading-none">{allTasks.length} <span className="text-xs">Items</span></h3>
-                </div>
-                <div className="bg-[#002B5B] p-8 rounded-xl shadow-lg relative overflow-hidden group">
-                  <h3 className="text-white font-black text-lg italic uppercase leading-none mb-1 text-left">Database Live</h3>
-                  <div className="mt-8 flex items-center gap-2 text-[#E9C46A] text-[10px] font-black uppercase tracking-widest">
-                    <div className="w-2 h-2 rounded-full bg-[#E9C46A] animate-pulse"></div>
-                    Sistem Online • 2026
-                  </div>
-                </div>
-              </div>
-
-              {/* TAMPILAN MONITORING REAL-TIME HARI INI */}
-              <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden text-left">
-                <div className="p-4 bg-[#002B5B] text-white flex justify-between items-center">
-                  <h3 className="font-black text-xs uppercase tracking-widest flex items-center gap-2">
-                    <AlertCircle size={16} className="text-[#E9C46A]"/> Ruangan Belum Dibersihkan (Hari Ini)
-                  </h3>
-                  <span className="bg-red-500 px-3 py-1 rounded-full text-[10px] font-black italic">
-                    {getUncleanedRooms().length} LOKASI LAGI
-                  </span>
-                </div>
-                <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {getUncleanedRooms().length > 0 ? (
-                    getUncleanedRooms().map(loc => (
-                      <div key={loc.id} className="flex items-center gap-3 p-3 bg-red-50 border border-red-100 rounded-lg">
-                        <div className="p-2 bg-white rounded shadow-sm text-red-500">
-                          <MapPin size={16}/>
-                        </div>
-                        <div>
-                          <p className="font-black text-[#002B5B] text-[11px] uppercase">{loc.name}</p>
-                          <p className="text-[9px] font-bold text-red-400 uppercase tracking-tighter italic">Belum Ada Laporan Valid</p>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="col-span-full py-10 text-center">
-                      <CheckCircle2 size={40} className="mx-auto text-green-500 mb-2 opacity-20"/>
-                      <p className="font-black text-slate-300 uppercase italic">Semua ruangan telah dibersihkan!</p>
-                    </div>
-                  )}
-                </div>
+      {activeTab === 'overview' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Baris Card Statistik Utama */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-xl border-l-8 border-[#002B5B] shadow-sm text-left">
+              <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-1">Total Unit Lokasi</p>
+              <h3 className="text-3xl font-black text-[#002B5B] italic leading-none">{locations.length} <span className="text-xs">Titik</span></h3>
+            </div>
+            <div className="bg-white p-6 rounded-xl border-l-8 border-[#E9C46A] shadow-sm text-left">
+              <p className="text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] mb-1">Periode Pantauan</p>
+              <h3 className="text-xl font-black text-[#002B5B] uppercase leading-none mt-2">
+                {/* Ini akan berubah secara live mengikuti input filter */}
+                {filterType === 'daily' 
+                  ? new Date(filterDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) 
+                  : new Date(filterMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
+                }
+              </h3>
+            </div>
+            <div className="bg-[#002B5B] p-6 rounded-xl shadow-lg flex flex-col justify-center">
+              <div className="flex gap-3 justify-center">
+                <div className="flex items-center gap-1"><div className="w-2 h-2 bg-red-500 rounded-full"></div> <span className="text-[9px] text-white font-bold uppercase">Belum</span></div>
+                <div className="flex items-center gap-1"><div className="w-2 h-2 bg-yellow-400 rounded-full"></div> <span className="text-[9px] text-white font-bold uppercase">Progres</span></div>
+                <div className="flex items-center gap-1"><div className="w-2 h-2 bg-green-500 rounded-full"></div> <span className="text-[9px] text-white font-bold uppercase">Valid</span></div>
               </div>
             </div>
-          )}
+          </div>
+
+          {/* Grid Status Lokasi Real-Time */}
+          <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden text-left">
+            <div className="p-4 bg-[#002B5B] text-white flex justify-between items-center">
+              <h3 className="font-black text-xs uppercase tracking-widest flex items-center gap-2">
+                <LayoutDashboard size={16} className="text-[#E9C46A]"/> Peta Status Kebersihan Ruangan
+              </h3>
+            </div>
+            
+            <div className="p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {locations.map((loc) => {
+                // Cari apakah ada log untuk lokasi ini di data yang sudah di-filter
+                const locLog = logs.find(l => l.location_id === loc.id);
+                
+                let bgColor = "bg-red-50 border-red-200 text-red-700"; // Default: BELUM (Merah)
+                let statusLabel = "Belum Dibersihkan";
+                let dotColor = "bg-red-500";
+
+                if (locLog) {
+                  if (locLog.status === 'DISETUJUI') {
+                    bgColor = "bg-green-50 border-green-200 text-green-700"; // VALID (Hijau)
+                    statusLabel = "Terverifikasi";
+                    dotColor = "bg-green-500";
+                  } else {
+                    bgColor = "bg-yellow-50 border-yellow-200 text-yellow-800"; // PROGRES (Kuning)
+                    statusLabel = "Menunggu Approve";
+                    dotColor = "bg-yellow-400";
+                  }
+                }
+
+                return (
+                  <div key={loc.id} className={`p-4 rounded-xl border-2 ${bgColor} transition-all hover:scale-105 shadow-sm flex flex-col justify-between min-h-[100px]`}>
+                    <div className="flex justify-between items-start">
+                      <span className="text-[9px] font-black px-1.5 py-0.5 bg-white/50 rounded uppercase tracking-tighter">
+                        {loc.id}
+                      </span>
+                      <div className={`w-2 h-2 rounded-full ${dotColor} shadow-sm animate-pulse`}></div>
+                    </div>
+                    
+                    <div className="mt-2">
+                      <h4 className="font-black text-[11px] uppercase leading-tight truncate">{loc.name}</h4>
+                      <p className="text-[8px] font-bold opacity-70 uppercase mt-1 tracking-widest">{statusLabel}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
         </div>
       </main>
     </div>
