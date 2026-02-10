@@ -31,6 +31,9 @@ export default function AdminPage() {
   const [newLoc, setNewLoc] = useState({ id: '', name: '', type: 'umum' });
   const [newTask, setNewTask] = useState({ name: '', category: 'umum' });
 
+  const [dashboardLogs, setDashboardLogs] = useState<any[]>([]); // Untuk tab Overview
+  const [monitoringLogs, setMonitoringLogs] = useState<any[]>([]); // Untuk tab Monitoring
+
   useEffect(() => {
     fetchData();
   }, [filterDate, filterMonth, filterType]);
@@ -70,7 +73,7 @@ async function fetchData() {
     const { data: filteredLogs } = await query;
     
     // Simpan ke state logs untuk digunakan oleh Grid di Overview
-    setLogs(filteredLogs || []);
+    setDashboardLogs(filteredLogs || []);
 
     // 3. Update Kategori
     const combined = Array.from(new Set(['umum', 'toilet', ...(tsks?.map(t => t.category.toLowerCase()) || [])]));
@@ -111,24 +114,66 @@ async function fetchData() {
     }
 
     const { data } = await query;
-    setLogs(data || []);
+    setMonitoringLogs(data || []);
   }
 
   const handleApprove = async (logId: string) => {
-      const { error } = await supabase.from('checklist_logs').update({ status: 'DISETUJUI' }).eq('id', logId);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('nama')
+        .eq('id', user?.id)
+        .single();
+
+      const { error } = await supabase
+        .from('checklist_logs')
+        .update({ 
+          status: 'DISETUJUI',
+          supervisor: profile?.nama || 'Admin' 
+        })
+        .eq('id', logId);
+
       if (!error) {
-        // Panggil fetchData agar state 'logs' terupdate dan Dashboard ikut berubah
-        fetchData(); 
-        if (activeTab === 'monitoring') fetchLogs();
+        // Panggil kedua fungsi ini agar UI langsung berubah
+        await fetchData(); 
+        await fetchLogs();
       }
-    };
+    } catch (err) {
+      console.error("Gagal melakukan approval:", err);
+    }
+  };
 
   const handleApproveAll = async () => {
-    const pendingLogs = logs.filter(l => l.status !== 'DISETUJUI').map(l => l.id);
-    if (pendingLogs.length === 0) return alert("Semua data sudah disetujui.");
+    // Pastikan mengambil dari monitoringLogs, bukan logs
+    const pendingLogs = monitoringLogs
+      .filter(l => l.status !== 'DISETUJUI' && l.status !== 'DITOLAK')
+      .map(l => l.id);
+
+    if (pendingLogs.length === 0) return alert("Tidak ada laporan yang perlu disetujui.");
+    
     if (confirm(`Setujui ${pendingLogs.length} laporan sekaligus?`)) {
-      const { error } = await supabase.from('checklist_logs').update({ status: 'DISETUJUI' }).in('id', pendingLogs);
-      if (!error) fetchLogs();
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('nama')
+        .eq('id', user?.id)
+        .single();
+
+      const { error } = await supabase
+        .from('checklist_logs')
+        .update({ 
+          status: 'DISETUJUI',
+          supervisor: profile?.nama || 'Admin' 
+        })
+        .in('id', pendingLogs);
+
+      if (!error) {
+        fetchData(); // Update Dashboard
+        fetchLogs(); // Update Tabel
+      } else {
+        alert("Gagal menyetujui: " + error.message);
+      }
     }
   };
 
@@ -354,7 +399,7 @@ const getUncleanedRooms = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {logs.map((log, index) => (
+                    {monitoringLogs.map((log, index) => (
                       <tr key={log.id} className="hover:bg-slate-50 transition-colors">
                         <td className="p-4 font-bold text-slate-400 text-xs">{index + 1}</td>
                         <td className="p-4 text-left pl-6">
@@ -407,7 +452,7 @@ const getUncleanedRooms = () => {
                             <div className="flex gap-1 justify-center">
                               <button 
                                 onClick={() => handleApprove(log.id)} 
-                                className="bg-[#2A9D8F] text-white px-2 py-1 rounded font-black text-[9px] uppercase hover:brightness-110 shadow-sm"
+                                className="bg-[#2A9D8F] text-white px-2 py-1 rounded font-black text-[9px] uppercase hover:bg-[#1f7a6f] active:scale-95 transition-all shadow-sm cursor-pointer z-30"
                               >
                                 Approve
                               </button>
@@ -581,7 +626,7 @@ const getUncleanedRooms = () => {
             <div className="p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {locations.map((loc) => {
                 // Cari apakah ada log untuk lokasi ini di data yang sudah di-filter
-                const locLog = logs.find(l => l.location_id === loc.id);
+                const locLog = dashboardLogs.find(l => l.location_id === loc.id);
                 
                 let bgColor = "bg-red-50 border-red-200 text-red-700"; // Default: BELUM (Merah)
                 let statusLabel = "Belum Dibersihkan";

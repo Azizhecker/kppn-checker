@@ -28,6 +28,8 @@ function RoomMonitoringContent() {
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const dateArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
+  const [supervisorData, setSupervisorData] = useState<{nama: string, nip: string} | null>(null);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setCurrentUrl(window.location.href);
@@ -59,40 +61,59 @@ function RoomMonitoringContent() {
   }
 
 async function fetchData() {
-    setLoading(true);
-    
-    // 1. Ambil Data Lokasi
-    const { data: locData } = await supabase.from('locations').select('*').eq('id', locId).single();
-    setLocation(locData);
+  setLoading(true);
+  
+  // 1. Ambil Data Lokasi
+  const { data: locData } = await supabase.from('locations').select('*').eq('id', locId).single();
+  setLocation(locData);
 
-    // 2. Ambil Template Task berdasarkan tipe lokasi
-    if (locData) {
-      const { data: taskData } = await supabase
-        .from('task_templates')
-        .select('*')
-        .eq('category', locData.type.toLowerCase())
-        .order('id', { ascending: true });
-      setTasks(taskData || []);
-    }
-
-    // 3. Tentukan Rentang Tanggal
-    const firstDay = new Date(selectedYear, selectedMonth - 1, 1, 0, 0, 0).toISOString();
-    const lastDay = new Date(selectedYear, selectedMonth, 0, 23, 59, 59).toISOString();
-
-// 4. Ambil Logs (HANYA YANG 'DISETUJUI' ATAU 'Diserahkan')
-    const { data: logsData } = await supabase
-      .from('checklist_logs')
-      .select('*, checklist_items(is_completed, task_id)')
-      .eq('location_id', locId)
-      // Menggunakan .in untuk memfilter lebih dari satu status
-      // Data 'DITOLAK' otomatis tidak akan masuk karena tidak ada di daftar ini
-      .in('status', ['DISETUJUI', 'Diserahkan']) 
-      .gte('created_at', firstDay)
-      .lte('created_at', lastDay);
-
-    setLogs(logsData || []);
-    setLoading(false);
+  // 2. Ambil Template Task
+  if (locData) {
+    const { data: taskData } = await supabase
+      .from('task_templates')
+      .select('*')
+      .eq('category', locData.type.toLowerCase())
+      .order('id', { ascending: true });
+    setTasks(taskData || []);
   }
+
+  const firstDay = new Date(selectedYear, selectedMonth - 1, 1, 0, 0, 0).toISOString();
+  const lastDay = new Date(selectedYear, selectedMonth, 0, 23, 59, 59).toISOString();
+
+  // 3. Ambil Logs
+  const { data: logsData } = await supabase
+    .from('checklist_logs')
+    .select('*, checklist_items(is_completed, task_id)')
+    .eq('location_id', locId)
+    .in('status', ['DISETUJUI', 'Diserahkan']) 
+    .gte('created_at', firstDay)
+    .lte('created_at', lastDay)
+    .order('created_at', { ascending: true });
+
+  setLogs(logsData || []);
+
+  // 4. LOGIKA BARU: Cari NIP Supervisor berdasarkan nama di log
+  const firstSupervisorName = logsData?.find(l => l.supervisor)?.supervisor;
+  
+  if (firstSupervisorName) {
+    const { data: profData } = await supabase
+      .from('profiles')
+      .select('nama, nip')
+      .eq('nama', firstSupervisorName) // Mencari di tabel profiles berdasarkan nama
+      .single();
+    
+    if (profData) {
+      setSupervisorData(profData);
+    } else {
+      // Jika tidak ketemu di profiles, tampilkan nama saja tanpa NIP
+      setSupervisorData({ nama: firstSupervisorName, nip: '' });
+    }
+  } else {
+    setSupervisorData(null);
+  }
+
+  setLoading(false);
+}
 
   const exportToPDF = async () => {
     if (!printRef.current) return;
@@ -239,11 +260,13 @@ async function fetchData() {
                 <QRCodeSVG value={currentUrl} size={48} md-size={64} />
             </div>
             <div className="w-full md:w-64 flex flex-col items-center px-1">
-              <span className="font-black uppercase border-b border-black w-full pb-1 mb-1 truncate text-[9px] md:text-sm">
-                {verifier ? verifier.nama : '................................'}
+              <span className="font-black uppercase border-b border-black w-full pb-1 mb-1 truncate text-[9px] md:text-sm h-6">
+                {/* Menampilkan nama supervisor yang melakukan approve */}
+                {supervisorData ? supervisorData.nama : '................................'}
               </span>
               <p className="font-bold italic text-[8px] md:text-xs uppercase">
-                {verifier ? (verifier.nip ? `NIP ${verifier.nip}` : verifier.role) : '................................'}
+                {/* Menampilkan NIP dari tabel profiles jika ditemukan */}
+                {supervisorData?.nip ? `NIP. ${supervisorData.nip}` : 'SUPERVISOR / PEMERIKSA'}
               </p>
             </div>
           </div>
