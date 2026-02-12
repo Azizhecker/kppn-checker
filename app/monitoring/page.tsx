@@ -251,7 +251,7 @@ async function fetchData() {
               <span className="font-black italic uppercase border-b border-black w-full pb-1 mb-1 truncate text-[9px] md:text-sm">
                 {logs.length > 0 ? logs[0].worker_name : '................................'}
               </span>
-              <p className="font-bold">Cleaning Service</p>
+              <p className="font-bold">Petugas</p>
             </div>
           </div>
           <div className="flex flex-col items-center">
