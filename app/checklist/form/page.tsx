@@ -161,7 +161,7 @@ const handleSubmit = async () => {
       </div>
 
       <h1 className="text-xl font-black text-[#003366] uppercase italic mb-6 text-center">
-        Formulir Kebersihan
+        Formulir Kebersihan dan Perawatan
       </h1>
 
       {/* TANGGAL */}
